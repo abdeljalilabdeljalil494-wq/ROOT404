@@ -46,3 +46,15 @@ class ReviewIn(BaseModel):
 class AskIn(BaseModel):
     message: str
     level: int = 2  # 1..5 — niveau d'assistance
+
+
+class RoomCreateIn(BaseModel):
+    name: str
+    type: str  # study | correction | pair | competition | mentor | live
+    project: str = ""
+    capacity: int = 10
+    live: bool = True
+
+
+class RoomMessageIn(BaseModel):
+    text: str

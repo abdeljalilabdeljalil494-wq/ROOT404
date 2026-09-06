@@ -258,10 +258,77 @@ def seed_if_empty() -> bool:
         # --- AI Mentor conversation (mirrors mock.aiConversation) -----------
         _seed_ai_messages(db, main)
 
+        # --- Collaboration Rooms (mirrors mock.rooms / roomMembers / chat) --
+        _seed_rooms(db, main, peers)
+
         db.commit()
         return True
     finally:
         db.close()
+
+
+# (id, name, type, project, capacity, base_members, live, host, tags)
+ROOMS = [
+    ("r1", "Correction Room 1", "correction", "minishell", 2, 0, True, "nour_dev", ["C", "Peer Review"]),
+    ("r2", "Pointeurs & Mémoire", "study", "get_next_line", 10, 5, True, "mehdi42", ["C", "Débutant"]),
+    ("r3", "Duo cub3d", "pair", "cub3d", 2, 0, True, "ines_dev", ["Raycasting"]),
+    ("r4", "Coalition War — Sprint 48h", "competition", "Algo Dojo", 40, 24, True, "system", ["Compétition"]),
+    ("r5", "Office Hours — Systèmes", "mentor", "Mentorat", 20, 8, False, "blackholesurvivor", ["Mentor", "Level 15+"]),
+    ("r6", "Live: Build a Web Server", "live", "webserv", 500, 118, True, "chaimacoder", ["Stream"]),
+]
+
+
+def _seed_rooms(db, main: models.User, peers: dict[str, models.User]) -> None:
+    now = _now()
+
+    def member(room_id: str, username: str, role: str, status: str) -> None:
+        u = main if username == main.username else peers.get(username)
+        if u is not None:
+            db.add(models.RoomMember(
+                room_id=room_id, user_id=u.id, role=role, status=status, joined_at=now,
+            ))
+
+    for rid, name, rtype, project, cap, base, live, host, tags in ROOMS:
+        db.add(models.Room(
+            id=rid, name=name, type=rtype, project=project, capacity=cap,
+            base_members=base, live=live, host=host, tags=tags, created_at=now,
+        ))
+
+    # r1 — correction minishell : 2/2 pleins + 3 observateurs (mock roomMembers)
+    member("r1", "nour_dev", "host", "online")
+    member("r1", main.username, "member", "online")
+    member("r1", "mehdi42", "observer", "online")
+    member("r1", "ines_dev", "observer", "idle")
+    member("r1", "skhalifa", "observer", "offline")
+    # r2 — study : host + 1 modélisé (base 5 → 6/10 comme le mock)
+    member("r2", "mehdi42", "host", "online")
+    member("r2", "chaimacoder", "member", "online")
+    # r3 — pair 2/2 · r5 — mentor (host + base 8 → 9/20)
+    member("r3", "ines_dev", "host", "online")
+    member("r3", "skhalifa", "member", "online")
+    member("r5", "blackholesurvivor", "host", "online")
+    # r6 — live (base 118)
+    member("r6", "chaimacoder", "host", "online")
+
+    def say(room_id: str, username: str, text: str, minutes_ago: int) -> None:
+        u = main if username == main.username else peers.get(username)
+        if u is not None:
+            db.add(models.RoomMessage(
+                room_id=room_id, user_id=u.id, text=text,
+                created_at=now - timedelta(minutes=minutes_ago),
+            ))
+
+    # Chat de r1 — mirror de mock.chatMessages
+    say("r1", "nour_dev", "Salut ! On commence la correction de minishell dans 5 min ?", 45)
+    say("r1", main.username, "Yes, je pousse mon dernier commit et je rejoins le vocal.", 44)
+    say("r1", "nour_dev", "Parfait. Prépare la checklist, je vais tester les heredocs en premier.", 43)
+    say("r1", "mehdi42", "Attention aux leaks sur les pipes, ça m'a coûté 20 points la semaine dernière.", 41)
+    say("r1", main.username, "Noté 🙏 valgrind est déjà lancé.", 40)
+    say("r2", "mehdi42", "Chapitre du jour : pointeurs et tableaux. Qui commence ?", 120)
+    say("r2", "chaimacoder", "Un tableau n'est qu'un pointeur déguisé — on s'attaque aux `char *` ensuite ?", 95)
+    say("r3", "ines_dev", "On a un bug sur les raycasters à la limite du map, quelqu'un a une idée ?", 30)
+    say("r5", "blackholesurvivor", "Office hours : apportez vos questions systèmes, j'arrive à 18h.", 60)
+    say("r6", "chaimacoder", "GO — on part sur le parsing HTTP, code dans le shared editor.", 15)
 
 
 def _seed_ai_messages(db, main: models.User) -> None:

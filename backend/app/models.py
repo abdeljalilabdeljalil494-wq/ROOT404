@@ -234,6 +234,65 @@ class AiMessage(Base):
     user: Mapped["User"] = relationship(back_populates="ai_messages")
 
 
+class Room(Base):
+    """A collaboration room (study / correction / pair / competition /
+    mentor / live). `base_members` = baseline headcount not modeled as
+    rows (large live rooms); real joins are RoomMember rows on top."""
+
+    __tablename__ = "rooms"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: new_id("r"))
+    name: Mapped[str] = mapped_column(String, unique=True, index=True)
+    type: Mapped[str] = mapped_column(String, default="study")  # study|correction|pair|competition|mentor|live
+    project: Mapped[str] = mapped_column(String, default="")
+    capacity: Mapped[int] = mapped_column(Integer, default=10)
+    base_members: Mapped[int] = mapped_column(Integer, default=0)
+    live: Mapped[bool] = mapped_column(Boolean, default=True)
+    host: Mapped[str] = mapped_column(String, default="")  # username
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+    members: Mapped[list["RoomMember"]] = relationship(
+        back_populates="room", cascade="all, delete-orphan"
+    )
+    messages: Mapped[list["RoomMessage"]] = relationship(
+        back_populates="room", cascade="all, delete-orphan"
+    )
+
+
+class RoomMember(Base):
+    __tablename__ = "room_members"
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_room_member"),)
+
+    room_id: Mapped[str] = mapped_column(
+        ForeignKey("rooms.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(String, default="member")  # host | member | observer
+    status: Mapped[str] = mapped_column(String, default="online")  # online | idle | offline
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+    room: Mapped["Room"] = relationship(back_populates="members")
+    user: Mapped["User"] = relationship()
+
+
+class RoomMessage(Base):
+    __tablename__ = "room_messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: new_id("rm"))
+    room_id: Mapped[str] = mapped_column(
+        ForeignKey("rooms.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    text: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+    room: Mapped["Room"] = relationship(back_populates="messages")
+    user: Mapped["User"] = relationship()
+
+
 class OtpCode(Base):
     """Single-use e-mail OTP, stored hashed with a short TTL."""
 

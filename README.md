@@ -653,8 +653,8 @@ npm install
 npm run dev                     # http://localhost:5173 — le proxy /api → :8000 est déjà configuré
 ```
 
-Les services `auth`, `projects`, `dashboard`, `judge`, `peer` et `ai`
-consomment l'API
+Les services `auth`, `projects`, `dashboard`, `judge`, `peer`, `ai` et
+`rooms` consomment l'API
 réelle ; les autres services restent sur leurs données mock jusqu'à la
 construction de leurs endpoints (repli automatique sur le mock si le backend
 est hors ligne).
@@ -709,6 +709,21 @@ POST /api/ai/reset     → nouvelle conversation
   soumission (projet, test, note).
 - `level` 1-5 = jusqu'où aller (hint → question → concept → ressources).
 
+### 🎙️ Collaboration Rooms
+
+```text
+GET  /api/rooms                 → [room…] (effectif = base + joins réels)
+POST /api/rooms                 {name, type, project?, capacity?} → je crée une room (hôte)
+GET  /api/rooms/{id}            → {room, members: [{name, avatar, status, role, me}], isMember}
+GET  /api/rooms/{id}/messages   → chat persisté (flag `me` calculé, 100 derniers)
+POST /api/rooms/{id}/messages   {text}
+POST /api/rooms/{id}/join       → membre, ou observateur si la room est pleine
+```
+
+Types : `study`, `correction`, `pair`, `competition`, `mentor`, `live`.
+Les joins et messages sont persistés — les effectifs des cartes se mettent à
+jour en direct.
+
 ---
 
 ## 🗺️ خارطة الطريق المحدّثة (Ultimate Roadmap)
@@ -722,7 +737,7 @@ POST /api/ai/reset     → nouvelle conversation
 - [x] Moulinette / Judge Engine — compilation `-Wall -Wextra -Werror` + suites de tests par projet (norme, runs, valgrind si présent)
 - [x] AI Mentor الأساسي — guide socratique (jamais la solution), contexte réel de la dernière soumission, conversation persistée
 - [x] Peer Review — créneaux, smart matching (niveau/langue/réputation), correction notée → projet validé
-- [ ] Collaboration Rooms
+- [x] Collaboration Rooms — 6 types de rooms, rejoint/création réels, chat persisté, effectifs en direct
 - [x] XP / Level System — XP à la première validation + recalcul de niveau (3860 XP/niveau, max 21)
 - [ ] Leaderboard
 - [ ] Basic Profile
@@ -741,13 +756,16 @@ POST /api/ai/reset     → nouvelle conversation
 >   pose des questions ciblées (segfault, fuites, pipes, norme, pointeurs,
 >   threads, printf…) en exploitant le contexte réel (dernière soumission,
 >   tests échoués), avec 5 niveaux d'assistance, conversation persistée et
->   AI Code Review calculé sur la dernière soumission conclue.
+>   AI Code Review calculé sur la dernière soumission conclue ;
+> - les **Collaboration Rooms** sont réelles : 6 types (study, correction,
+>   pair, competition, mentor, live), création de room, rejoint (déborde en
+>   « observateur » si la room est pleine) et chat persisté par room.
 >
 > Frontend branché : « Exécuter » / « Passer la Moulinette » du workspace,
 > le dernier résultat sur la fiche projet, la page Peer Review (créneaux,
-> réservation, correction notée) et la page AI Mentor (chat réel + AI
-> Review). Les UI restantes Phase 1 (Rooms, Leaderboard, Analytics) existent
-> déjà en mock et seront branchées aux étapes suivantes.
+> réservation, correction notée), la page AI Mentor (chat réel + AI Review)
+> et les Rooms (liste, création, détail, chat). Il reste le Leaderboard et
+> les Analytics à brancher pour boucler la Phase 1.
 
 ### Phase 2 — Learning Intelligence
 - [ ] Code Journey

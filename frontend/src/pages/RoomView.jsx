@@ -6,7 +6,9 @@ import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import Avatar from '../components/ui/Avatar'
 import ProgressBar from '../components/ui/ProgressBar'
-import { chatChannels, chatMessages, roomMembers, rooms, roomTypes, currentUser } from '../data/mock'
+import { chatChannels, chatMessages, roomMembers as mockMembers, rooms as mockRooms, roomTypes } from '../data/mock'
+import useAuthUser from '../hooks/useAuthUser'
+import { roomService } from '../services/api'
 
 const CHECKLIST = [
   { text: 'Le dépôt clone et compile sans warning', done: true },
@@ -20,8 +22,13 @@ const CHECKLIST = [
 
 export default function RoomView() {
   const { id = 'r1' } = useParams()
-  const room = rooms.find((r) => r.id === id) || rooms[0]
-  const type = roomTypes.find((t) => t.key === room.type)
+  const me = useAuthUser()
+  const fallbackRoom = mockRooms.find((r) => r.id === id) || mockRooms[0]
+  const [room, setRoom] = useState(fallbackRoom)
+  const [members, setMembers] = useState(mockMembers)
+  const [isMember, setIsMember] = useState(false)
+  const [joinError, setJoinError] = useState(null)
+  const type = roomTypes.find((t) => t.key === room.type) || roomTypes[0]
 
   usePageHeader(
     { title: room.name, breadcrumb: [{ label: 'Rooms', to: '/rooms' }, { label: room.name }] },
@@ -37,25 +44,58 @@ export default function RoomView() {
   const scrollRef = useRef(null)
 
   useEffect(() => {
+    let alive = true
+    setJoinError(null)
+    Promise.all([roomService.detail(id), roomService.messages(id)])
+      .then(([d, msgs]) => {
+        if (!alive) return
+        if (d?.room) setRoom(d.room)
+        if (Array.isArray(d?.members) && d.members.length) setMembers(d.members)
+        setIsMember(Boolean(d?.isMember))
+        if (Array.isArray(msgs) && msgs.length) setMessages(msgs)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [id])
+
+  useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [messages])
 
-  const send = (e) => {
+  const join = async () => {
+    try {
+      const r = await roomService.join(id)
+      if (r?.id) setRoom(r)
+      const d = await roomService.detail(id)
+      if (d?.members) setMembers(d.members)
+      setIsMember(Boolean(d?.isMember))
+    } catch (err) {
+      setJoinError(err.response?.data?.detail || err.message)
+    }
+  }
+
+  const send = async (e) => {
     e.preventDefault()
     if (!draft.trim()) return
-    setMessages((m) => [
-      ...m,
-      {
-        id: Date.now(),
-        user: currentUser.username,
-        avatar: currentUser.avatar,
-        time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-        text: draft.trim(),
-        me: true,
-      },
-    ])
+    const optimistic = {
+      id: Date.now(),
+      user: me.username,
+      avatar: me.avatar,
+      time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      text: draft.trim(),
+      me: true,
+    }
+    setMessages((m) => [...m, optimistic])
     setDraft('')
+    try {
+      const saved = await roomService.send(id, draft.trim())
+      if (saved?.id) setMessages((m) => m.map((x) => (x.id === optimistic.id ? saved : x)))
+    } catch {
+      /* garde le message optimiste */
+    }
   }
 
   const doneCount = checks.filter((c) => c.done).length
@@ -91,9 +131,9 @@ export default function RoomView() {
           ))}
         </div>
         <div className="flex shrink-0 items-center gap-2 border-t border-line p-2.5">
-          <Avatar src={currentUser.avatar} name={currentUser.displayName} size="xs" status="online" />
+          <Avatar src={me.avatar} name={me.displayName} size="xs" status="online" />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[11.5px] font-semibold text-ink">{currentUser.displayName}</p>
+            <p className="truncate text-[11.5px] font-semibold text-ink">{me.displayName}</p>
             <p className="truncate text-[10px] text-ok">En ligne</p>
           </div>
           <button className="grid h-7 w-7 place-items-center rounded text-ink-faint hover:text-ink" aria-label="Paramètres">
@@ -113,6 +153,14 @@ export default function RoomView() {
             <p className="truncate font-mono text-[10.5px] text-ink-dim">{room.project}</p>
           </div>
           {room.live && <Badge tone="danger" dot className="ml-1">Live</Badge>}
+          {isMember ? (
+            <Badge tone="ok" dot className="ml-1">Tu es membre</Badge>
+          ) : (
+            <Button size="sm" variant="outline" icon="Users" className="ml-1" onClick={join}>
+              Rejoindre
+            </Button>
+          )}
+          {joinError && <span className="ml-1 text-[11px] text-danger">{joinError}</span>}
           <div className="ml-auto flex items-center gap-1">
             {['Video', 'Monitor', 'Users', 'MoreHorizontal'].map((i) => (
               <button key={i} aria-label={i} className="grid h-8 w-8 place-items-center rounded-md text-ink-dim transition-colors hover:bg-white/[0.06] hover:text-ink">
@@ -231,11 +279,16 @@ export default function RoomView() {
 
         <div className="p-4">
           <h2 className="mb-3 text-[12px] font-bold uppercase tracking-wider text-ink-dim">
-            Membres — {roomMembers.length}
+            Membres — {members.length}
           </h2>
           <ul className="space-y-1">
-            {roomMembers.map((m) => (
-              <li key={m.name} className="flex items-center gap-2.5 rounded-md px-1.5 py-1.5 transition-colors hover:bg-white/[0.03]">
+            {members.map((m) => (
+              <li
+                key={m.name}
+                className={`flex items-center gap-2.5 rounded-md px-1.5 py-1.5 transition-colors hover:bg-white/[0.03] ${
+                  m.me ? 'bg-brand-500/[0.07]' : ''
+                }`}
+              >
                 <Avatar src={m.avatar} name={m.name} size="xs" status={m.status} />
                 <div className="min-w-0 flex-1">
                   <p className={`truncate text-[12px] ${m.status === 'offline' ? 'text-ink-faint' : 'text-ink-soft'}`}>

@@ -42,7 +42,7 @@ http.interceptors.response.use(
 const ALL_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 const ALL_REAL = import.meta.env.VITE_USE_MOCK === 'false'
 const REAL_SERVICES = new Set(
-  (import.meta.env.VITE_REAL_SERVICES || 'auth,projects,dashboard,judge,peer,ai')
+  (import.meta.env.VITE_REAL_SERVICES || 'auth,projects,dashboard,judge,peer,ai,rooms')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
@@ -163,9 +163,23 @@ export const leaderboardService = {
 /* ---------------------------------- Rooms -------------------------------- */
 export const roomService = {
   list: () => resolve(mock.rooms, () => http.get('/rooms'), 'rooms'),
+  detail: (id) =>
+    resolve(
+      {
+        room: mock.rooms.find((r) => r.id === id) || mock.rooms[0],
+        members: mock.roomMembers,
+        isMember: true,
+      },
+      () => http.get(`/rooms/${id}`),
+      'rooms',
+    ),
   messages: (id) =>
     resolve(mock.chatMessages, () => http.get(`/rooms/${id}/messages`), 'rooms'),
   join: (id) => resolve({ ok: true }, () => http.post(`/rooms/${id}/join`), 'rooms'),
+  send: (id, text) =>
+    resolve({ ok: true }, () => http.post(`/rooms/${id}/messages`, { text }), 'rooms'),
+  create: (payload) =>
+    resolve({ ok: true }, () => http.post('/rooms', payload), 'rooms'),
 }
 
 /* ---------------------------------- Judge -------------------------------- */

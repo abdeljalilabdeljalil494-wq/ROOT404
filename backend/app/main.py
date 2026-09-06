@@ -31,10 +31,17 @@ Phase 1 — Core MVP (steps 1-2):
     GET  /api/ai/review      AI Code Review de la dernière soumission
     POST /api/ai/reset       nouvelle conversation
 
+    GET  /api/rooms          liste des rooms (effectifs réels)
+    POST /api/rooms          création d'une room
+    GET  /api/rooms/{id}     {room, members, isMember}
+    GET  /api/rooms/{id}/messages   chat persisté (flag `me`)
+    POST /api/rooms/{id}/messages   envoyer un message
+    POST /api/rooms/{id}/join       rejoindre (observer si pleine)
+
 Sandbox: hybrid executor — Docker Ubuntu containers when Docker is
 available, restricted local subprocess (CPU/RAM/disk caps) otherwise.
-Leaderboard, rooms & analytics endpoints land in the following steps —
-the frontend keeps serving mock data for them meanwhile.
+Leaderboard & analytics endpoints land in the following steps — the frontend
+keeps serving mock data for them meanwhile.
 """
 
 import logging
@@ -43,7 +50,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import ai, auth, dashboard, judge, peer, projects
+from .api import ai, auth, dashboard, judge, peer, projects, rooms
 from .core.config import settings
 from .core.db import Base, engine
 from .services.seed import seed_if_empty
@@ -94,6 +101,7 @@ api.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api.include_router(judge.router, prefix="/judge", tags=["judge"])
 api.include_router(peer.router, prefix="/peer-review", tags=["peer-review"])
 api.include_router(ai.router, prefix="/ai", tags=["ai"])
+api.include_router(rooms.router, prefix="/rooms", tags=["rooms"])
 app.include_router(api)
 
 

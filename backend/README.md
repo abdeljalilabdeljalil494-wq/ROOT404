@@ -59,6 +59,12 @@ vérification — inutile de s'inscrire pour tester.
 | POST | `/api/ai/ask` | `{message, level? 1-5}` → réponse socratique contextuelle (jamais la solution) |
 | GET | `/api/ai/review` | AI Code Review de la dernière soumission conclue `{metrics, notes}` |
 | POST | `/api/ai/reset` | Nouvelle conversation |
+| GET | `/api/rooms` | Liste des rooms (effectifs réels) |
+| POST | `/api/rooms` | `{name, type, project?, capacity?}` — création (l'utilisateur devient hôte) |
+| GET | `/api/rooms/{id}` | `{room, members: [{name, avatar, status, role, me}], isMember}` |
+| GET | `/api/rooms/{id}/messages` | Chat persisté (100 derniers, flag `me` calculé) |
+| POST | `/api/rooms/{id}/messages` | `{text}` — envoyer un message |
+| POST | `/api/rooms/{id}/join` | Rejoindre (rôle observateur si room pleine) |
 | GET | `/api/dashboard/stats` | 4 tuiles KPI (XP, projets, CP, valeur de compte) — calculées en direct |
 | GET | `/api/dashboard/activity` | 5 derniers événements de la timeline |
 | GET | `/api/dashboard/weekly` | Activité des 7 derniers jours |
@@ -70,7 +76,7 @@ backend/
 ├── app/
 │   ├── api/            # Routers (auth, projects, dashboard, judge)
 │   ├── core/           # config (pydantic-settings), db (SQLAlchemy), security (JWT/OTP)
-│   ├── services/       # serializers, seed, sandbox, moulinette, templates, progress
+│   ├── services/       # serializers, seed, sandbox, moulinette, templates, progress, peer, ai, rooms
 │   ├── models.py       # ORM : User, Project, UserProject, Submission, …
 │   ├── schemas.py      # Schémas Pydantic (requêtes)
 │   └── main.py         # Entrypoint FastAPI + CORS + lifespan (create_all + seed)
@@ -100,7 +106,11 @@ backend/
   (dernière soumission, tests échoués) et 5 niveaux d'assistance ; AI Code
   Review calculé sur la dernière soumission conclue (metrics + notes).
   `ask()` est le point d'attache prévu pour brancher un vrai LLM ensuite.
+- `rooms.py` — Collaboration Rooms : 6 types, `base_members` (effectif de
+  base des grosses rooms live) + lignes `RoomMember` (host/member/observer,
+  un join déborde en observer si room pleine), chat persisté `RoomMessage`
+  (flag `me` à la sérialisation).
 
 ## Étapes suivantes (Phase 1)
 
-- Rooms & chat, Leaderboard & Coalitions, Analytics.
+- Leaderboard & Coalitions, Analytics.
