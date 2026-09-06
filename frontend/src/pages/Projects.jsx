@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import usePageHeader from '../hooks/usePageHeader'
 import Icon from '../components/ui/Icon'
@@ -7,7 +7,8 @@ import Button from '../components/ui/Button'
 import Tabs from '../components/ui/Tabs'
 import ProgressBar from '../components/ui/ProgressBar'
 import EmptyState from '../components/ui/EmptyState'
-import { projects, projectStatusMap } from '../data/mock'
+import { projectService } from '../services/api'
+import { projects as mockProjects, projectStatusMap } from '../data/mock'
 
 /* ---------- Status pill ---------- */
 function StatusCell({ p }) {
@@ -155,6 +156,21 @@ function ProjectCard({ p }) {
 
 export default function Projects() {
   usePageHeader({ title: 'Mes projets', breadcrumb: [{ label: 'Mes projets' }] })
+
+  // Real per-user project states from the backend (mock fallback when offline).
+  const [projects, setProjects] = useState(mockProjects)
+  useEffect(() => {
+    let alive = true
+    projectService
+      .list()
+      .then((list) => {
+        if (alive && list?.length) setProjects(list)
+      })
+      .catch(() => {}) // unauthenticated / offline → keep the mock list below
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const [tab, setTab] = useState('all')
   const [q, setQ] = useState('')

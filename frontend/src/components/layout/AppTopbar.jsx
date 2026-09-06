@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom'
 import Icon from '../ui/Icon'
 import Avatar from '../ui/Avatar'
 import ThemeToggle from '../ui/ThemeToggle'
-import { currentUser } from '../../data/mock'
+import useAuthUser from '../../hooks/useAuthUser'
+import { authService } from '../../services/api'
 
 const NOTIFS = [
   { icon: 'ClipboardCheck', tone: 'text-brand-500', text: 'nour_dev a réservé un slot de correction pour minishell.', time: '2 min' },
@@ -15,6 +16,12 @@ const NOTIFS = [
 export default function AppTopbar({ title, breadcrumb = [], onMenu, actions }) {
   const [notifOpen, setNotifOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const currentUser = useAuthUser()
+
+  const logout = () => {
+    authService.logout()
+    window.location.href = '/'
+  }
 
   return (
     <header className="sticky top-0 z-30 flex h-[60px] shrink-0 items-center gap-3 border-b border-line bg-root-950/95 px-4 backdrop-blur-xl sm:px-6">
@@ -125,12 +132,13 @@ export default function AppTopbar({ title, breadcrumb = [], onMenu, actions }) {
                   </Link>
                 ))}
                 <div className="mt-1 border-t border-line pt-1">
-                  <Link
-                    to="/"
-                    className="flex items-center gap-2.5 px-4 py-2 text-[13px] text-danger transition-colors hover:bg-danger/10"
+                  <button
+                    type="button"
+                    onClick={logout}
+                    className="flex w-full items-center gap-2.5 px-4 py-2 text-left text-[13px] text-danger transition-colors hover:bg-danger/10"
                   >
                     <Icon name="LogOut" size={15} /> Déconnexion
-                  </Link>
+                  </button>
                 </div>
               </div>
             </>

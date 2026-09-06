@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import AuthLayout from './AuthLayout'
 import Button from '../../components/ui/Button'
 import Icon from '../../components/ui/Icon'
+import { authService, setAuthUser } from '../../services/api'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -11,6 +12,8 @@ export default function Login() {
   const [code, setCode] = useState(['', '', '', '', '', ''])
   const [loading, setLoading] = useState(false)
   const [seconds, setSeconds] = useState(60)
+  const [devCode, setDevCode] = useState(null)
+  const [error, setError] = useState(null)
   const refs = useRef([])
 
   useEffect(() => { document.title = 'Se connecter — ROOT 404' }, [])
@@ -22,11 +25,22 @@ export default function Login() {
     return () => clearInterval(id)
   }, [step])
 
-  const sendOtp = (e) => {
+  const sendOtp = async (e) => {
     e.preventDefault()
     if (!email) return
     setLoading(true)
-    setTimeout(() => { setLoading(false); setStep('otp'); setSeconds(60) }, 800)
+    setError(null)
+    try {
+      const res = await authService.requestOtp(email)
+      setDevCode(res?.dev_code || null)
+      setLoading(false)
+      setStep('otp')
+      setSeconds(60)
+    } catch (err) {
+      // Backend online but rejected (e.g. 429 resend rate limit).
+      setLoading(false)
+      setError(err.response?.data?.detail || "Impossible d'envoyer le code — réessaie.")
+    }
   }
 
   const onDigit = (i, v) => {
@@ -39,13 +53,35 @@ export default function Login() {
     if (e.key === 'Backspace' && !code[i] && i > 0) refs.current[i - 1]?.focus()
   }
 
-  const verify = (e) => {
+  const fillDevCode = () => {
+    if (!devCode) return
+    setCode(devCode.split(''))
+    refs.current[5]?.focus()
+  }
+
+  const verify = async (e) => {
     e.preventDefault()
+    const full = code.join('')
+    if (full.length !== 6) return
     setLoading(true)
-    setTimeout(() => {
-      localStorage.setItem('root404_token', 'mock.jwt.token')
+    setError(null)
+    try {
+      const res = await authService.verifyOtp(email, full)
+      if (res?.token) localStorage.setItem('root404_token', res.token)
+      if (res?.user) setAuthUser(res.user)
       navigate('/dashboard')
-    }, 900)
+    } catch (err) {
+      if (err.response) {
+        // Backend online: surface the real error (bad/expired code, …).
+        setError(err.response.data?.detail || 'Code incorrect — réessaie.')
+      } else {
+        // Backend offline → demo session (mock contract) so the app stays usable.
+        localStorage.setItem('root404_token', 'mock.jwt.token')
+        navigate('/dashboard')
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -107,6 +143,22 @@ export default function Login() {
         </form>
       ) : (
         <form onSubmit={verify} className="space-y-5">
+          {error && (
+            <p className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/[0.08] p-3 text-[12px] leading-relaxed text-danger">
+              <Icon name="AlertTriangle" size={14} className="mt-0.5 shrink-0" /> {error}
+            </p>
+          )}
+          {devCode && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-info/25 bg-info/[0.06] p-3">
+              <p className="text-[11.5px] leading-relaxed text-ink-dim">
+                <span className="font-semibold text-info">Mode dev</span> — pas d'e-mail envoyé.
+                Ton code est <span className="font-mono text-[13px] font-bold tracking-widest text-ink">{devCode}</span>
+              </p>
+              <Button type="button" variant="outline" size="sm" onClick={fillDevCode}>
+                Remplir
+              </Button>
+            </div>
+          )}
           <div>
             <label className="mb-2.5 block text-[12.5px] font-semibold text-ink">Code de vérification</label>
             <div className="flex gap-2">

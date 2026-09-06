@@ -4,6 +4,7 @@ import AuthLayout from './AuthLayout'
 import Button from '../../components/ui/Button'
 import Icon from '../../components/ui/Icon'
 import ProgressBar from '../../components/ui/ProgressBar'
+import { authService, setAuthUser } from '../../services/api'
 
 const CAMPUSES = ['Tunis', 'Sfax', 'Sousse']
 const LEVELS = [
@@ -16,17 +17,41 @@ export default function Register() {
   const navigate = useNavigate()
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
   const [form, setForm] = useState({ name: '', email: '', campus: 'Tunis', level: 'some', terms: false })
 
   useEffect(() => { document.title = 'Postuler — ROOT 404' }, [])
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
-  const next = (e) => {
+  const next = async (e) => {
     e.preventDefault()
     if (step < 3) return setStep(step + 1)
     setLoading(true)
-    setTimeout(() => navigate('/dashboard'), 1000)
+    setError(null)
+    try {
+      const res = await authService.register({
+        full_name: form.name,
+        email: form.email,
+        campus: form.campus,
+        level: form.level,
+        terms: form.terms,
+      })
+      if (res?.token) localStorage.setItem('root404_token', res.token)
+      if (res?.user) setAuthUser(res.user)
+      navigate('/dashboard')
+    } catch (err) {
+      if (err.response) {
+        // Backend online: surface the real error (e.g. email déjà utilisé).
+        setError(err.response.data?.detail || 'Candidature impossible — réessaie.')
+      } else {
+        // Backend offline → demo session (mock contract).
+        localStorage.setItem('root404_token', 'mock.jwt.token')
+        navigate('/dashboard')
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -47,6 +72,12 @@ export default function Register() {
         </div>
         <ProgressBar value={(step / 3) * 100} height={4} />
       </div>
+
+      {error && (
+        <p className="mb-4 flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/[0.08] p-3 text-[12px] leading-relaxed text-danger">
+          <Icon name="AlertTriangle" size={14} className="mt-0.5 shrink-0" /> {error}
+        </p>
+      )}
 
       <form onSubmit={next} className="space-y-4">
         {step === 1 && (

@@ -3,7 +3,8 @@ import Logo from '../Logo'
 import Icon from '../ui/Icon'
 import Avatar from '../ui/Avatar'
 import ProgressBar from '../ui/ProgressBar'
-import { currentUser } from '../../data/mock'
+import useAuthUser from '../../hooks/useAuthUser'
+import { authService } from '../../services/api'
 
 export const SIDEBAR_GROUPS = [
   {
@@ -79,6 +80,13 @@ function Item({ item, onNavigate }) {
 }
 
 export default function Sidebar({ open = false, onClose }) {
+  const currentUser = useAuthUser()
+
+  const logout = () => {
+    authService.logout()
+    window.location.href = '/'
+  }
+
   return (
     <>
       {/* Mobile scrim */}
@@ -159,13 +167,14 @@ export default function Sidebar({ open = false, onClose }) {
             />
           </div>
 
-          <NavLink
-            to="/"
-            className="mt-2 flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-ink-dim transition-colors hover:bg-danger/10 hover:text-danger"
+          <button
+            type="button"
+            onClick={logout}
+            className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-ink-dim transition-colors hover:bg-danger/10 hover:text-danger"
           >
             <Icon name="LogOut" size={17} />
             Déconnexion
-          </NavLink>
+          </button>
         </div>
       </aside>
     </>

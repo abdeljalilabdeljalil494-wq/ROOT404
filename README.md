@@ -629,13 +629,43 @@ ROOT 404 لا تكون مجرد موقع لتعلم البرمجة، بل **بي
 
 ---
 
+## 🚀 Démarrage rapide
+
+**Backend** (FastAPI — voir `backend/README.md` pour le détail) :
+
+```bash
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env            # DEBUG=true → le code OTP est renvoyé dans la réponse
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Base de données SQLite créée + seedée automatiquement au premier lancement
+(compte de démo : `abdeljalil@root404.tn`). PostgreSQL en production via
+`DATABASE_URL`.
+
+**Frontend** (React/Vite) :
+
+```bash
+cd frontend
+npm install
+npm run dev                     # http://localhost:5173 — le proxy /api → :8000 est déjà configuré
+```
+
+Les services `auth`, `projects` et `dashboard` consomment l'API réelle ; les
+autres services restent sur leurs données mock jusqu'à la construction de
+leurs endpoints (repli automatique sur le mock si le backend est hors ligne).
+
+---
+
 ## 🗺️ خارطة الطريق المحدّثة (Ultimate Roadmap)
 
 ### Phase 1 — Core MVP
-- [ ] Auth + User Profiles
-- [ ] Dashboard
-- [ ] Projects & Path System
-- [ ] Monaco Code Editor
+- [x] Auth + User Profiles — backend OTP/JWT live, login/register branchés
+- [x] Dashboard — stats, activité & hebdo calculés en direct
+- [x] Projects & Path System — statuts par utilisateur + soumissions en file
+- [x] Monaco Code Editor
 - [ ] Docker/Ubuntu Sandbox
 - [ ] Moulinette / Judge Engine
 - [ ] AI Mentor الأساسي
@@ -644,6 +674,13 @@ ROOT 404 لا تكون مجرد موقع لتعلم البرمجة، بل **بي
 - [ ] XP / Level System
 - [ ] Leaderboard
 - [ ] Basic Profile
+
+> **Statut (06/09/2026)** : le backend FastAPI est en ligne pour le cœur du
+> MVP (Auth, Projects, Dashboard) et le frontend est branché dessus. Les UI
+> des autres systèmes Phase 1 existent déjà (mock) et seront branchées aux
+> endpoints backend dans les étapes suivantes — la prochaine étape est le
+> **Judge / Moulinette** (exécution sandboxée + tests), les soumissions étant
+> déjà persistées en `pending`.
 
 ### Phase 2 — Learning Intelligence
 - [ ] Code Journey

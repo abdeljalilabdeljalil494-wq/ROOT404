@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import usePageHeader from '../hooks/usePageHeader'
+import useAuthUser from '../hooks/useAuthUser'
 import Icon from '../components/ui/Icon'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
@@ -8,7 +9,8 @@ import Tabs from '../components/ui/Tabs'
 import Avatar from '../components/ui/Avatar'
 import ProgressBar from '../components/ui/ProgressBar'
 import EmptyState from '../components/ui/EmptyState'
-import { projects, moulinetteTests, currentUser } from '../data/mock'
+import { projectService } from '../services/api'
+import { projects as mockProjects, moulinetteTests } from '../data/mock'
 
 const OBJECTIVES = [
   'Afficher un prompt et lire une ligne avec la bibliothèque readline.',
@@ -41,13 +43,49 @@ const CORRECTIONS = [
 
 export default function ProjectDetail() {
   const { slug } = useParams()
-  const p = projects.find((x) => x.slug === slug) || projects[2]
+  const currentUser = useAuthUser()
   const [tab, setTab] = useState('description')
+  const [p, setP] = useState(null)
+
+  // Real project (with the current user's state) from the backend.
+  useEffect(() => {
+    let alive = true
+    setP(null)
+    projectService
+      .bySlug(slug)
+      .then((proj) => {
+        if (!alive) return
+        setP(
+          proj ||
+            mockProjects.find((x) => x.slug === slug) ||
+            mockProjects[2],
+        )
+      })
+      .catch(() => {
+        // offline / unauthenticated → mock detail (or minishell as default)
+        if (!alive) return
+        setP(mockProjects.find((x) => x.slug === slug) || mockProjects[2])
+      })
+    return () => {
+      alive = false
+    }
+  }, [slug])
 
   usePageHeader(
-    { title: p.name, breadcrumb: [{ label: 'Mes projets', to: '/projects' }, { label: p.name }] },
-    [p.slug],
+    { title: p?.name || 'Projet', breadcrumb: [{ label: 'Mes projets', to: '/projects' }, { label: p?.name || 'Projet' }] },
+    [p?.slug],
   )
+
+  if (!p) {
+    return (
+      <div className="grid min-h-[60vh] place-items-center">
+        <div className="flex flex-col items-center gap-3">
+          <span className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-brand-500" />
+          <span className="text-[12px] text-ink-dim">Chargement du projet…</span>
+        </div>
+      </div>
+    )
+  }
 
   const passed = moulinetteTests.filter((t) => t.status === 'pass').length
 

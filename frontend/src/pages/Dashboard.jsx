@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import usePageHeader from '../hooks/usePageHeader'
+import useAuthUser from '../hooks/useAuthUser'
 import Icon from '../components/ui/Icon'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
@@ -7,14 +9,14 @@ import Avatar from '../components/ui/Avatar'
 import StatCard from '../components/ui/StatCard'
 import ProgressBar from '../components/ui/ProgressBar'
 import BarChart from '../components/ui/BarChart'
+import { dashboardService, projectService } from '../services/api'
 import {
-  currentUser,
-  dashboardStats,
-  recentActivity,
-  weeklyActivity,
+  dashboardStats as mockStats,
+  recentActivity as mockActivity,
+  weeklyActivity as mockWeekly,
   dailyMission,
   upcomingSlots,
-  projects,
+  projects as mockProjects,
 } from '../data/mock'
 
 const TONE_TEXT = { ok: 'text-ok', danger: 'text-danger', brand: 'text-brand-500', muted: 'text-ink-dim' }
@@ -37,6 +39,34 @@ function Panel({ title, action, children, className = '', icon }) {
 
 export default function Dashboard() {
   usePageHeader({ title: 'Tableau de bord' })
+  const currentUser = useAuthUser()
+
+  // Real data from the FastAPI backend (falls back to mock when offline).
+  const [stats, setStats] = useState(mockStats)
+  const [activity, setActivity] = useState(mockActivity)
+  const [weekly, setWeekly] = useState(mockWeekly)
+  const [projects, setProjects] = useState(mockProjects)
+
+  useEffect(() => {
+    let alive = true
+    Promise.all([
+      dashboardService.stats(),
+      dashboardService.activity(),
+      dashboardService.weekly(),
+      projectService.list(),
+    ])
+      .then(([s, a, w, p]) => {
+        if (!alive) return
+        if (s?.length) setStats(s)
+        if (a?.length) setActivity(a)
+        if (w?.length) setWeekly(w)
+        if (p?.length) setProjects(p)
+      })
+      .catch(() => {}) // unauthenticated / offline → keep the mock data below
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const inProgress = projects.filter((p) => p.status === 'progress' || p.status === 'available').slice(0, 3)
 
@@ -93,7 +123,7 @@ export default function Dashboard() {
 
       {/* ---------- KPI row ---------- */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {dashboardStats.map(({ key, ...s }) => (
+        {stats.map(({ key, ...s }) => (
           <StatCard key={key} {...s} />
         ))}
       </div>
@@ -110,7 +140,7 @@ export default function Dashboard() {
           }
         >
           <ul className="divide-y divide-line/70">
-            {recentActivity.map((a) => (
+            {activity.map((a) => (
               <li
                 key={a.id}
                 className="flex items-center gap-3.5 px-5 py-3.5 transition-colors hover:bg-white/[0.02]"
@@ -144,7 +174,7 @@ export default function Dashboard() {
         <div className="space-y-5">
           <Panel title="Activité hebdomadaire" icon="BarChart3" action={<Badge tone="ok">+18%</Badge>}>
             <div className="p-5">
-              <BarChart data={weeklyActivity} height={140} />
+              <BarChart data={weekly} height={140} />
               <p className="mt-4 border-t border-line pt-3 text-[11.5px] text-ink-dim">
                 <span className="font-semibold text-ink">17 h 24 min</span> de code cette semaine —
                 meilleur jour : mercredi.
