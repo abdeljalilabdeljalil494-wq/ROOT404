@@ -1,0 +1,236 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   ROOT 404 — global design tokens & primitives
+   ============================================================ */
+
+@layer base {
+  :root {
+    --bg: #04090e;
+    --bg-page: #060b10;
+    --surface: #0c1116;
+    --surface-2: #080d12;
+    --line: #161e27;
+    --brand: #f8851f;
+  }
+
+  /* Light theme overrides (toggled by removing `.dark` on <html>) */
+  html:not(.dark) {
+    --bg: #ffffff;
+    --bg-page: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #f1f3f6;
+    --line: #e3e7ec;
+  }
+
+  * {
+    @apply border-line;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-[var(--bg-page)] font-sans text-ink antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    text-rendering: optimizeLegibility;
+  }
+
+  html:not(.dark) body {
+    @apply text-[#101720];
+  }
+
+  [dir='rtl'],
+  .font-ar {
+    font-family: 'Noto Kufi Arabic', Inter, sans-serif;
+  }
+
+  ::selection {
+    background: rgba(248, 133, 31, 0.3);
+    color: #fff;
+  }
+
+  /* Scrollbars — thin, dark, brand thumb on hover */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1b242e;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2c3947;
+    background-clip: padding-box;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  /* ---------- Surfaces ---------- */
+  .card {
+    @apply rounded-xl border border-line bg-root-800/90 shadow-card;
+  }
+  html:not(.dark) .card {
+    @apply border-[#e3e7ec] bg-white;
+  }
+
+  .panel {
+    @apply rounded-xl border border-line bg-root-850;
+  }
+  html:not(.dark) .panel {
+    @apply border-[#e3e7ec] bg-[#f1f3f6];
+  }
+
+  .hairline {
+    @apply border-line;
+  }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-lg text-[13px]
+           font-semibold leading-none transition-all duration-200 disabled:pointer-events-none disabled:opacity-45;
+  }
+  .btn-sm {
+    @apply h-8 px-3 text-[12px];
+  }
+  .btn-md {
+    @apply h-10 px-4;
+  }
+  .btn-lg {
+    @apply h-12 px-6 text-sm;
+  }
+
+  .btn-primary {
+    @apply bg-brand-500 text-[#160A00] hover:bg-brand-400 active:bg-brand-600;
+    box-shadow: 0 6px 22px -10px rgba(248, 133, 31, 0.9);
+  }
+  .btn-outline {
+    @apply border border-line-strong bg-transparent text-ink hover:border-brand-500/70 hover:bg-brand-500/[0.07] hover:text-white;
+  }
+  html:not(.dark) .btn-outline {
+    @apply border-[#d6dbe2] text-[#101720] hover:text-[#101720];
+  }
+  .btn-ghost {
+    @apply text-ink-soft hover:bg-white/5 hover:text-ink;
+  }
+  .btn-soft {
+    @apply bg-brand-500/10 text-brand-400 hover:bg-brand-500/20;
+  }
+  .btn-danger {
+    @apply bg-danger/15 text-danger hover:bg-danger/25;
+  }
+
+  /* ---------- Form controls ---------- */
+  .input {
+    @apply h-10 w-full rounded-lg border border-line bg-root-850 px-3 text-[13px] text-ink
+           placeholder:text-ink-faint focus:border-brand-500/60 focus:outline-none focus:ring-0;
+  }
+  html:not(.dark) .input {
+    @apply border-[#dfe4ea] bg-white text-[#101720];
+  }
+
+  .select {
+    @apply input cursor-pointer appearance-none bg-no-repeat pr-8;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236B7885' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 0.65rem center;
+  }
+
+  /* ---------- Chips / badges ---------- */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-line bg-root-750/60 px-2 py-1
+           text-[11px] font-medium text-ink-soft;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide;
+  }
+
+  /* ---------- Text ---------- */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-dim;
+  }
+  .stat-num {
+    @apply font-sans text-2xl font-extrabold tracking-tight text-white;
+  }
+  html:not(.dark) .stat-num {
+    @apply text-[#101720];
+  }
+
+  /* ---------- Layout helpers ---------- */
+  .container-page {
+    @apply mx-auto w-full max-w-[1320px] px-4 sm:px-6 lg:px-8;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@layer utilities {
+  .text-gradient-brand {
+    @apply bg-gradient-to-r from-brand-400 via-brand-500 to-brand-300 bg-clip-text text-transparent;
+  }
+
+  /* Faint grid used behind hero / empty states */
+  .bg-grid {
+    background-image: linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+    background-size: 46px 46px;
+  }
+
+  .bg-dots {
+    background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  .mask-fade-b {
+    -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  }
+
+  .glow-brand {
+    box-shadow: 0 0 40px -6px rgba(248, 133, 31, 0.55);
+  }
+
+  .stroke-dash {
+    stroke-dasharray: 4 6;
+  }
+}
+
+/* Monaco tweaks so the editor melts into the shell */
+.monaco-editor,
+.monaco-editor-background,
+.monaco-editor .margin {
+  background-color: #0a0f15 !important;
+}
+.monaco-editor .scroll-decoration {
+  box-shadow: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
