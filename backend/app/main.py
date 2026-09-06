@@ -20,6 +20,12 @@ Phase 1 — Core MVP (steps 1-2):
     POST /api/judge/run           workspace « Exécuter » (compile + run)
     POST /api/judge/moulinette/{slug}   full Moulinette (tests + score + XP)
 
+    GET  /api/peer-review         mes slots / slots dispo / historique / stats
+    POST /api/peer-review/slot    ouvrir un créneau (moulinette OK requise)
+    POST /api/peer-review/{id}/reserve   me proposer comme correcteur
+    POST /api/peer-review/{id}/cancel    annuler un créneau
+    POST /api/peer-review/{id}/complete  valider la correction (note + CP)
+
 Sandbox: hybrid executor — Docker Ubuntu containers when Docker is
 available, restricted local subprocess (CPU/RAM/disk caps) otherwise.
 Rooms, AI mentor, leaderboard & analytics endpoints land in the following
@@ -32,7 +38,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import auth, dashboard, judge, projects
+from .api import auth, dashboard, judge, peer, projects
 from .core.config import settings
 from .core.db import Base, engine
 from .services.seed import seed_if_empty
@@ -81,6 +87,7 @@ api.include_router(auth.router, prefix="/auth", tags=["auth"])
 api.include_router(projects.router, prefix="/projects", tags=["projects"])
 api.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api.include_router(judge.router, prefix="/judge", tags=["judge"])
+api.include_router(peer.router, prefix="/peer-review", tags=["peer-review"])
 app.include_router(api)
 
 

@@ -66,6 +66,7 @@ def user_payload(user, db=None) -> dict:
         "campus": user.campus,
         "coalition": coalition,
         "avatar": user.avatar,
+        "languages": user.languages,
         "level": round(float(user.level), 2),
         "levelProgress": user.level_progress,
         "xp": user.xp,

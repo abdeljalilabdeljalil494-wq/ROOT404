@@ -59,6 +59,7 @@ class User(Base):
     campus: Mapped[str] = mapped_column(String, default="Tunis")
     avatar: Mapped[str] = mapped_column(String, default="")
     bio: Mapped[str] = mapped_column(String, default="")
+    languages: Mapped[str] = mapped_column(String, default="FR")
 
     # Socials (flat columns → same shape as the frontend `socials` object)
     github: Mapped[str] = mapped_column(String, default="")
@@ -182,6 +183,36 @@ class ActivityEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
     user: Mapped["User"] = relationship(back_populates="activity")
+
+
+class PeerSlot(Base):
+    """A peer-correction slot: a student (who passed the moulinette) is
+    corrected by a reviewer of equal or higher level.
+
+    Status flow: open → reserved → done | cancelled.
+    """
+
+    __tablename__ = "peer_slots"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: new_id("pr"))
+    student_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    reviewer_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    status: Mapped[str] = mapped_column(String, default="open")  # open | reserved | done | cancelled
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comment: Mapped[str] = mapped_column(String, default="")
+    match_pct: Mapped[int] = mapped_column(Integer, default=80)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+    student: Mapped["User"] = relationship(foreign_keys=[student_id])
+    reviewer: Mapped["User | None"] = relationship(foreign_keys=[reviewer_id])
+    project: Mapped["Project"] = relationship()
 
 
 class OtpCode(Base):

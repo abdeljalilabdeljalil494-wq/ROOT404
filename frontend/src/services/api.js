@@ -42,7 +42,7 @@ http.interceptors.response.use(
 const ALL_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 const ALL_REAL = import.meta.env.VITE_USE_MOCK === 'false'
 const REAL_SERVICES = new Set(
-  (import.meta.env.VITE_REAL_SERVICES || 'auth,projects,dashboard,judge')
+  (import.meta.env.VITE_REAL_SERVICES || 'auth,projects,dashboard,judge,peer')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
@@ -188,6 +188,29 @@ export const judgeService = {
     ),
 }
 
+/* ------------------------------- Peer Review ----------------------------- */
+export const peerService = {
+  list: () =>
+    resolve(
+      {
+        upcoming: mock.peerRequests,
+        available: mock.peerAvailable,
+        history: mock.peerHistory,
+        stats: { given: 47, received: 38 },
+      },
+      () => http.get('/peer-review'),
+      'peer',
+    ),
+  createSlot: (project, when) =>
+    resolve({ ok: true }, () => http.post('/peer-review/slot', { project, when }), 'peer'),
+  reserve: (id) =>
+    resolve({ ok: true }, () => http.post(`/peer-review/${id}/reserve`), 'peer'),
+  cancel: (id) =>
+    resolve({ ok: true }, () => http.post(`/peer-review/${id}/cancel`), 'peer'),
+  complete: (id, score, comment) =>
+    resolve({ ok: true }, () => http.post(`/peer-review/${id}/complete`, { score, comment }), 'peer'),
+}
+
 /* ------------------------------- AI Mentor ------------------------------- */
 export const aiService = {
   history: () => resolve(mock.aiConversation, () => http.get('/ai/history'), 'ai'),
@@ -218,6 +241,7 @@ export default {
   leaderboardService,
   roomService,
   judgeService,
+  peerService,
   aiService,
   analyticsService,
 }

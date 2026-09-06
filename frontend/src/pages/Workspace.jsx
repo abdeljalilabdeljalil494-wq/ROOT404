@@ -517,7 +517,7 @@ export default function Workspace() {
                         </li>
                       ))}
                     </ul>
-                    <Button size="sm" full className="mt-3.5" iconRight="ArrowRight">
+                    <Button size="sm" full className="mt-3.5" to="/peer-review" iconRight="ArrowRight">
                       Envoyer en Peer Review
                     </Button>
                   </>

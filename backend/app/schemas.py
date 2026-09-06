@@ -31,3 +31,13 @@ class SubmitIn(BaseModel):
     files: list[FileIn] = []
     slug: str | None = None  # used by /judge/run (workspace « Exécuter »)
     note: str | None = None
+
+
+class SlotIn(BaseModel):
+    project: str  # project slug
+    when: str | None = None  # ISO datetime (scheduled slot); default: +1 h
+
+
+class ReviewIn(BaseModel):
+    score: int  # 0..100 — note du correcteur
+    comment: str = ""

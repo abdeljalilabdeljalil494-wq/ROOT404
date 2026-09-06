@@ -677,6 +677,21 @@ GET  /api/projects/{slug}/last-result             → dernier résultat     (fic
 - **Note** : `⌊100 × points_gagnés / points_totaux⌋` ; passage si ≥ 95,
   aucun `fail` et compilation OK. Première validation du projet ⇒ XP + niveau.
 
+### 🤝 Peer Review
+
+Après la moulinette, la correction passe par un autre étudiant (à la 42) :
+
+```text
+GET  /api/peer-review                  → {upcoming, available, history, stats}
+POST /api/peer-review/slot             {project, when?}  (moulinette OK requise)
+POST /api/peer-review/{id}/reserve     → me proposer comme correcteur (niveau ≥ l'étudiant)
+POST /api/peer-review/{id}/cancel      → annuler / se retirer
+POST /api/peer-review/{id}/complete    {score, comment?} → ≥75 : projet validé, sinon échec +2 j
+```
+
+Matching 0-100 = proximité de niveau (70 %) + réputation moyenne (30 %).
+Le correcteur gagne **+20 CP et +50 XP** par correction.
+
 ---
 
 ## 🗺️ خارطة الطريق المحدّثة (Ultimate Roadmap)
@@ -689,21 +704,28 @@ GET  /api/projects/{slug}/last-result             → dernier résultat     (fic
 - [x] Sandbox hybride — Docker (`--network none`, 512 Mo, 1 vCPU) avec repli local (rlimits) si Docker absent
 - [x] Moulinette / Judge Engine — compilation `-Wall -Wextra -Werror` + suites de tests par projet (norme, runs, valgrind si présent)
 - [ ] AI Mentor الأساسي
-- [ ] Peer Review
+- [x] Peer Review — créneaux, smart matching (niveau/langue/réputation), correction notée → projet validé
 - [ ] Collaboration Rooms
 - [x] XP / Level System — XP à la première validation + recalcul de niveau (3860 XP/niveau, max 21)
 - [ ] Leaderboard
 - [ ] Basic Profile
 
 > **Statut (06/09/2026)** : le cœur du MVP est en ligne — Auth, Projects,
-> Dashboard **et le Judge / Moulinette** : la soumission (workspace ou
-> `POST /projects/{slug}/submit`) est compilée et exécutée dans le sandbox
-> (Docker si disponible, sinon local avec rlimits), notée sur 100, et
-> l'XP/niveau sont mis à jour. Frontend branché : « Exécuter » et « Passer la
-> Moulinette » du workspace appellent l'API réelle, et la fiche projet
-> affiche le dernier résultat. Les UI des autres systèmes Phase 1 (AI, Peer
-> Review, Rooms, Leaderboard…) existent déjà en mock et seront branchées aux
-> étapes suivantes.
+> Dashboard, **le Judge / Moulinette** et **le Peer Review** :
+> - la soumission (workspace ou `POST /projects/{slug}/submit`) est compilée
+>   et exécutée dans le sandbox (Docker si disponible, sinon local avec
+>   rlimits), notée sur 100, et l'XP/niveau sont mis à jour ;
+> - après validation de la moulinette, l'étudiant ouvre un créneau de
+>   correction ; un correcteur de niveau ≥ se propose (matching sur niveau,
+>   langue et réputation) et note la correction : ≥ 75 → projet validé,
+>   sinon retour en échec (pénalité 2 j). Le correcteur gagne +20 CP et
+>   +50 XP.
+>
+> Frontend branché : « Exécuter » / « Passer la Moulinette » du workspace,
+> le dernier résultat sur la fiche projet, et la page Peer Review (créneaux,
+> réservation, correction notée). Les UI des autres systèmes Phase 1 (AI,
+> Rooms, Leaderboard…) existent déjà en mock et seront branchées aux étapes
+> suivantes.
 
 ### Phase 2 — Learning Intelligence
 - [ ] Code Journey

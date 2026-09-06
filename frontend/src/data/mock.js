@@ -418,6 +418,25 @@ export const moulinetteTests = [
   { name: 'Signaux (SIGINT / SIGQUIT)', status: 'fail', detail: 'Ctrl-\\ non géré' },
 ]
 
+/* Peer Review — same shapes as GET /api/peer-review */
+export const peerRequests = [
+  { id: 1, peer: 'nour_dev', displayName: 'Nour H.', avatar: 'https://i.pravatar.cc/64?img=32', level: 5.88, project: 'minishell', when: "Aujourd'hui 16:30", role: 'Tu es corrigé', match: 94, languages: 'FR / AR', status: 'reserved', canCancel: true },
+  { id: 2, peer: 'skhalifa', displayName: 'Sarra K.', avatar: 'https://i.pravatar.cc/64?img=26', level: 6.02, project: 'ft_printf', when: 'Demain 10:00', role: 'Tu corriges', match: 88, languages: 'FR', status: 'reserved', canCancel: true },
+]
+
+export const peerAvailable = [
+  { id: 3, peer: 'mehdi42', displayName: 'Mehdi K.', avatar: 'https://i.pravatar.cc/64?img=33', level: 9.94, project: 'philosophers', when: "Aujourd'hui 18:00", match: 91, languages: 'FR / EN', rep: 93, canReserve: false },
+  { id: 4, peer: 'ines_dev', displayName: 'Ines S.', avatar: 'https://i.pravatar.cc/64?img=47', level: 6.36, project: 'minishell', when: 'Demain 09:30', match: 86, languages: 'AR / FR', rep: 88, canReserve: true },
+  { id: 5, peer: 'oussama_c', displayName: 'Oussama R.', avatar: 'https://i.pravatar.cc/64?img=53', level: 5.41, project: 'get_next_line', when: 'Demain 14:00', match: 74, languages: 'FR', rep: 79, canReserve: true },
+  { id: 6, peer: 'chaimacoder', displayName: 'Chaima B.', avatar: 'https://i.pravatar.cc/64?img=45', level: 10.87, project: 'netpractice', when: 'Jeudi 11 sept. 11:00', match: 82, languages: 'EN / FR', rep: 96, canReserve: false },
+]
+
+export const peerHistory = [
+  { id: 7, peer: 'blackholesurvivor', avatar: 'https://i.pravatar.cc/64?img=12', project: 'netpractice', date: '24 août 2026', score: 100, given: true },
+  { id: 8, peer: 'ines_dev', avatar: 'https://i.pravatar.cc/64?img=47', project: 'ft_printf', date: '19 août 2026', score: 115, given: false },
+  { id: 9, peer: 'mehdi42', avatar: 'https://i.pravatar.cc/64?img=33', project: 'get_next_line', date: '11 août 2026', score: 100, given: true },
+]
+
 export const aiCodeReview = {
   metrics: [
     { label: 'Correctness', value: 94 },

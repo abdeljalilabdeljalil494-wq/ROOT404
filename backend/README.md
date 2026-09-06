@@ -50,6 +50,11 @@ vérification — inutile de s'inscrire pour tester.
 | GET | `/api/projects/{slug}/last-result` | Dernier résultat de la Moulinette `{status, score, tests, terminal, via, at}` (404 si aucune) |
 | POST | `/api/judge/run` | Workspace « Exécuter » : compile + 1 run → `{lines, exit, via}` |
 | POST | `/api/judge/moulinette/{slug}` | Moulinette complète : `{files?}` → `{tests, score, status, error?, lines, via}` (files → dernière soumission → template) |
+| GET | `/api/peer-review` | `{upcoming, available, history, stats}` — slots de correction (mock-compatible) |
+| POST | `/api/peer-review/slot` | `{project, when?}` — ouvre un créneau (projet validé à la moulinette requis) |
+| POST | `/api/peer-review/{id}/reserve` | Je me propose comme correcteur (niveau ≥ l'étudiant) |
+| POST | `/api/peer-review/{id}/cancel` | J'annule (étudiant) ou je me retire (correcteur → slot redevient open) |
+| POST | `/api/peer-review/{id}/complete` | `{score, comment?}` — ≥75 : projet validé ; sinon échec + pénalité 2 j ; correcteur +20 CP / +50 XP |
 | GET | `/api/dashboard/stats` | 4 tuiles KPI (XP, projets, CP, valeur de compte) — calculées en direct |
 | GET | `/api/dashboard/activity` | 5 derniers événements de la timeline |
 | GET | `/api/dashboard/weekly` | Activité des 7 derniers jours |
@@ -82,6 +87,9 @@ backend/
 - `templates.py` — fichiers de départ des 5 projets (C valides, compilables).
 - `progress.py` — XP à la première validation + recalcul du niveau
   (3860 XP/niveau, max 21).
+- `peer.py` — Peer Review : matching 0-100 (niveau 70 % + réputation 30 %),
+  cycle de vie des slots (open → reserved → done / cancelled), récompenses
+  (+20 CP / +50 XP au correcteur), validation du projet si note ≥ 75.
 
 ## Étapes suivantes (Phase 1)
 

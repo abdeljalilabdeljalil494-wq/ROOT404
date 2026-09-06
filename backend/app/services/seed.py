@@ -56,6 +56,7 @@ MAIN_STUDENT = dict(
     full_name="Abdeljalil Ben Youssef",
     title="Coder — Cursus Systèmes",
     campus="Tunis",
+    languages="FR / AR",
     avatar="https://i.pravatar.cc/160?img=13",
     bio="Étudiant en systèmes & réseaux. J'aime le C, les pointeurs et les segfaults à 3h du matin.",
     github="abdeljalil", discord="abdeljalil#404", site="root404.tn/u/abdeljalil",
@@ -77,6 +78,17 @@ OTHER_STUDENTS = [
     ("nour_dev", "Nour Haddad", "Nour H.", 5.88, 21050, 33, 84, 2, 32),
     ("oussama_c", "Oussama Riachi", "Oussama R.", 5.41, 19620, 31, 79, 0, 53),
 ]
+
+# Langue(s) d'interface — affichée dans le matchmaking peer review
+LANGUAGES = {
+    "blackholesurvivor": "EN",
+    "chaimacoder": "EN / FR",
+    "mehdi42": "FR / EN",
+    "ines_dev": "AR / FR",
+    "skhalifa": "FR",
+    "nour_dev": "FR / AR",
+    "oussama_c": "FR",
+}
 
 # (slug, status, score, bonus, progress, retry_days)
 MAIN_USER_PROJECTS = [
@@ -208,8 +220,9 @@ def seed_if_empty() -> bool:
             ))
 
         # --- Other students --------------------------------------------------
+        peers: dict[str, models.User] = {}
         for i, (username, full, display, level, xp, done, acc, co_idx, img) in enumerate(OTHER_STUDENTS):
-            db.add(models.User(
+            u = models.User(
                 id=f"u_{i + 2:03d}",
                 username=username,
                 email=f"{username}@root404.tn",
@@ -218,6 +231,7 @@ def seed_if_empty() -> bool:
                 title="Coder — Cursus C",
                 campus="Tunis",
                 avatar=f"https://i.pravatar.cc/160?img={img}",
+                languages=LANGUAGES.get(username, "FR"),
                 level=level,
                 level_progress=(level * 7) % 100,
                 xp=xp,
@@ -233,9 +247,61 @@ def seed_if_empty() -> bool:
                 github=username,
                 discord=f"{username}#404",
                 site=f"root404.tn/u/{username}",
-            ))
+            )
+            db.add(u)
+            peers[username] = u
+        db.flush()
+
+        # --- Peer Review slots (mirrors mock REQUESTS / AVAILABLE / HISTORY) -
+        _seed_peer_slots(db, main, projects, peers)
 
         db.commit()
         return True
     finally:
         db.close()
+
+
+def _seed_peer_slots(db, main: models.User, projects: dict, peers: dict[str, models.User]) -> None:
+    """Slots for the Peer Review page — relative to `now` so the French
+    labels (« Aujourd'hui 16:30 », « Demain 10:00 ») stay believable."""
+    from . import peer as peer_svc
+
+    now = _now()
+
+    def slot(student: models.User, project_slug: str, at: datetime, status: str,
+             reviewer: models.User | None = None, score: int | None = None,
+             comment: str = "") -> models.PeerSlot:
+        s = models.PeerSlot(
+            student_id=student.id,
+            reviewer_id=reviewer.id if reviewer else None,
+            project_id=projects[project_slug].id,
+            scheduled_at=at,
+            status=status,
+            score=score,
+            comment=comment,
+            match_pct=peer_svc.match_pct(reviewer or main, student) if reviewer else 0,
+        )
+        if status == "done":
+            s.updated_at = at
+            s.created_at = at - timedelta(days=1)
+        db.add(s)
+        return s
+
+    # « Mes slots » — the demo student is involved in both
+    slot(main, "minishell", now + timedelta(hours=1, minutes=30), "reserved", reviewer=peers["nour_dev"])
+    slot(peers["skhalifa"], "ft_printf", now + timedelta(hours=20), "reserved", reviewer=main)
+
+    # « Slots disponibles » — open slots from other students
+    # (mehdi42 / chaimacoder are above the demo student's level → not reservable)
+    slot(peers["mehdi42"], "philosophers", now + timedelta(hours=2), "open")
+    slot(peers["ines_dev"], "minishell", now + timedelta(hours=22), "open")
+    slot(peers["oussama_c"], "get_next_line", now + timedelta(hours=26), "open")
+    slot(peers["chaimacoder"], "netpractice", now + timedelta(days=3, hours=11), "open")
+
+    # « Historique » — past corrections involving the demo student
+    slot(peers["blackholesurvivor"], "netpractice", now - timedelta(days=13),
+         "done", reviewer=main, score=100, comment="Net, bien commenté. Bonus clean.")
+    slot(main, "ft_printf", now - timedelta(days=18),
+         "done", reviewer=peers["ines_dev"], score=115, comment="Bonus complet, belle implémentation.")
+    slot(peers["mehdi42"], "get_next_line", now - timedelta(days=26),
+         "done", reviewer=main, score=100)
