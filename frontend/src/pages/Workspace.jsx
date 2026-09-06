@@ -7,8 +7,9 @@ import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import Avatar from '../components/ui/Avatar'
 import ProgressBar from '../components/ui/ProgressBar'
-import { fileTree, sampleCode, moulinetteTests, currentUser, aiCodeReview } from '../data/mock'
-import { judgeService, projectService } from '../services/api'
+import { fileTree, sampleCode, moulinetteTests, aiCodeReview } from '../data/mock'
+import useAuthUser from '../hooks/useAuthUser'
+import { aiService, judgeService, projectService } from '../services/api'
 
 /* ------------------------------------------------------------------ */
 /* Monaco theme matching the ROOT 404 palette                          */
@@ -108,6 +109,8 @@ export default function Workspace() {
   const [mlTests, setMlTests] = useState(null)
   const [mlResult, setMlResult] = useState(null)
   const [judging, setJudging] = useState(false)
+  const [aiReview, setAiReview] = useState(null)
+  const me = useAuthUser()
   const termRef = useRef(null)
 
   const code = contents[activeFile] ?? sampleCode
@@ -136,6 +139,19 @@ export default function Workspace() {
         setActiveFile(t.files[0].name)
         setContents(Object.fromEntries(t.files.map((f) => [f.name, f.content])))
       })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [slug])
+
+  /* AI Code Review of the latest submission (falls back to mock offline). */
+  useEffect(() => {
+    let alive = true
+    setAiReview(null)
+    aiService
+      .review()
+      .then((r) => alive && setAiReview(r))
       .catch(() => {})
     return () => {
       alive = false
@@ -229,7 +245,7 @@ export default function Workspace() {
             </button>
           ))}
           <Link to="/profile" className="ml-1">
-            <Avatar src={currentUser.avatar} name={currentUser.displayName} size="xs" status="online" />
+            <Avatar src={me.avatar} name={me.displayName} size="xs" status="online" />
           </Link>
         </div>
       </header>
@@ -523,21 +539,28 @@ export default function Workspace() {
                   </>
                 ) : (
                   <>
-                    <ul className="space-y-2.5">
-                      {aiCodeReview.metrics.map((m) => (
-                        <li key={m.label}>
-                          <ProgressBar
-                            value={m.value}
-                            showLabel
-                            label={m.label}
-                            height={5}
-                            color={m.value >= 85 ? '#2ECC71' : m.value >= 70 ? '#F8851F' : '#E5484D'}
-                          />
-                        </li>
-                      ))}
-                    </ul>
+                    {aiReview?.metrics ? (
+                      <ul className="space-y-2.5">
+                        {aiReview.metrics.map((m) => (
+                          <li key={m.label}>
+                            <ProgressBar
+                              value={m.value}
+                              showLabel
+                              label={m.label}
+                              height={5}
+                              color={m.value >= 85 ? '#2ECC71' : m.value >= 70 ? '#F8851F' : '#E5484D'}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mb-4 rounded-lg border border-line bg-root-850 p-3 text-[12px] text-ink-dim">
+                        {aiReview?.notes?.[0]?.text ||
+                          'Aucune soumission analysable — passe d’abord la Moulinette.'}
+                      </p>
+                    )}
                     <div className="mt-4 space-y-2.5">
-                      {aiCodeReview.notes.map((n, i) => (
+                      {(aiReview?.notes?.length ? aiReview.notes : aiCodeReview.notes).map((n, i) => (
                         <div
                           key={i}
                           className={`rounded-lg border p-3 text-[11.5px] leading-relaxed text-ink-soft ${

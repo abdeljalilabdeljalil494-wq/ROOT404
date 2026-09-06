@@ -255,10 +255,44 @@ def seed_if_empty() -> bool:
         # --- Peer Review slots (mirrors mock REQUESTS / AVAILABLE / HISTORY) -
         _seed_peer_slots(db, main, projects, peers)
 
+        # --- AI Mentor conversation (mirrors mock.aiConversation) -----------
+        _seed_ai_messages(db, main)
+
         db.commit()
         return True
     finally:
         db.close()
+
+
+def _seed_ai_messages(db, main: models.User) -> None:
+    now = _now()
+    rows = [
+        ("ai",
+         "Salut Abdeljalil 👋 J'ai analysé ta dernière soumission de `minishell`. "
+         "Je ne vais pas te donner la solution — mais je peux t'aider à la trouver. "
+         "Par quoi veux-tu commencer ?",
+         {"chips": ["Comprendre mon erreur", "Expliquer un concept", "Me donner un indice"]},
+         "minishell", 3.2),
+        ("user",
+         "Mon shell segfault quand je fais `cat | cat | ls`. Je ne comprends pas pourquoi.",
+         {}, "minishell", 2.9),
+        ("ai",
+         "Bonne observation — ce cas enchaîne trois processus. Avant de plonger dans le code, réponds-moi :",
+         {
+             "list": [
+                 "Combien de pipes crées-tu pour 3 commandes ?",
+                 "Que deviennent les descripteurs dans le processus parent après le fork ?",
+                 "Est-ce que chaque enfant ferme bien les extrémités qu'il n'utilise pas ?",
+             ],
+             "footer": "Un segfault ici vient souvent d'un `close()` manquant ou d'un tableau de pipes mal indexé.",
+         },
+         "minishell", 2.8),
+    ]
+    for i, (role, text, extra, project, hours_ago) in enumerate(rows):
+        db.add(models.AiMessage(
+            user_id=main.id, role=role, text=text, extra=extra, project=project,
+            created_at=now - timedelta(hours=hours_ago),
+        ))
 
 
 def _seed_peer_slots(db, main: models.User, projects: dict, peers: dict[str, models.User]) -> None:

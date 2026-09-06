@@ -41,3 +41,8 @@ class SlotIn(BaseModel):
 class ReviewIn(BaseModel):
     score: int  # 0..100 — note du correcteur
     comment: str = ""
+
+
+class AskIn(BaseModel):
+    message: str
+    level: int = 2  # 1..5 — niveau d'assistance

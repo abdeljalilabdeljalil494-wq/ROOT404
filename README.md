@@ -653,7 +653,8 @@ npm install
 npm run dev                     # http://localhost:5173 — le proxy /api → :8000 est déjà configuré
 ```
 
-Les services `auth`, `projects`, `dashboard` et `judge` consomment l'API
+Les services `auth`, `projects`, `dashboard`, `judge`, `peer` et `ai`
+consomment l'API
 réelle ; les autres services restent sur leurs données mock jusqu'à la
 construction de leurs endpoints (repli automatique sur le mock si le backend
 est hors ligne).
@@ -692,6 +693,22 @@ POST /api/peer-review/{id}/complete    {score, comment?} → ≥75 : projet vali
 Matching 0-100 = proximité de niveau (70 %) + réputation moyenne (30 %).
 Le correcteur gagne **+20 CP et +50 XP** par correction.
 
+### 🤖 AI Mentor (guide socratique)
+
+```text
+GET  /api/ai/history   → {messages, context, stats}  (conversation persistée + AI Dependency)
+POST /api/ai/ask       {message, level 1-5} → réponse ciblée (question, concept, ressources)
+GET  /api/ai/review    → {metrics, notes} — Correctness / Memory Safety / Quality / Complexity / Readability
+POST /api/ai/reset     → nouvelle conversation
+```
+
+- Règle d'or : **jamais la solution finale** — questions socratiques,
+  explication du concept, suggestions de ressources (et refus explicite si
+  l'étudiant demande qu'on écrive le code à sa place).
+- Contexte réel : le mentor cite le dernier test échoué de la dernière
+  soumission (projet, test, note).
+- `level` 1-5 = jusqu'où aller (hint → question → concept → ressources).
+
 ---
 
 ## 🗺️ خارطة الطريق المحدّثة (Ultimate Roadmap)
@@ -703,7 +720,7 @@ Le correcteur gagne **+20 CP et +50 XP** par correction.
 - [x] Monaco Code Editor
 - [x] Sandbox hybride — Docker (`--network none`, 512 Mo, 1 vCPU) avec repli local (rlimits) si Docker absent
 - [x] Moulinette / Judge Engine — compilation `-Wall -Wextra -Werror` + suites de tests par projet (norme, runs, valgrind si présent)
-- [ ] AI Mentor الأساسي
+- [x] AI Mentor الأساسي — guide socratique (jamais la solution), contexte réel de la dernière soumission, conversation persistée
 - [x] Peer Review — créneaux, smart matching (niveau/langue/réputation), correction notée → projet validé
 - [ ] Collaboration Rooms
 - [x] XP / Level System — XP à la première validation + recalcul de niveau (3860 XP/niveau, max 21)
@@ -719,13 +736,18 @@ Le correcteur gagne **+20 CP et +50 XP** par correction.
 >   correction ; un correcteur de niveau ≥ se propose (matching sur niveau,
 >   langue et réputation) et note la correction : ≥ 75 → projet validé,
 >   sinon retour en échec (pénalité 2 j). Le correcteur gagne +20 CP et
->   +50 XP.
+>   +50 XP ;
+> - l'**AI Mentor** (guide socratique) ne donne jamais la solution : il
+>   pose des questions ciblées (segfault, fuites, pipes, norme, pointeurs,
+>   threads, printf…) en exploitant le contexte réel (dernière soumission,
+>   tests échoués), avec 5 niveaux d'assistance, conversation persistée et
+>   AI Code Review calculé sur la dernière soumission conclue.
 >
 > Frontend branché : « Exécuter » / « Passer la Moulinette » du workspace,
-> le dernier résultat sur la fiche projet, et la page Peer Review (créneaux,
-> réservation, correction notée). Les UI des autres systèmes Phase 1 (AI,
-> Rooms, Leaderboard…) existent déjà en mock et seront branchées aux étapes
-> suivantes.
+> le dernier résultat sur la fiche projet, la page Peer Review (créneaux,
+> réservation, correction notée) et la page AI Mentor (chat réel + AI
+> Review). Les UI restantes Phase 1 (Rooms, Leaderboard, Analytics) existent
+> déjà en mock et seront branchées aux étapes suivantes.
 
 ### Phase 2 — Learning Intelligence
 - [ ] Code Journey

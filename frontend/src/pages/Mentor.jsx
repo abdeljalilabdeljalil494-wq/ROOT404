@@ -1,18 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import usePageHeader from '../hooks/usePageHeader'
 import Icon from '../components/ui/Icon'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import Avatar from '../components/ui/Avatar'
 import ProgressBar from '../components/ui/ProgressBar'
-import { aiConversation, aiLevels, currentUser, skillGraph } from '../data/mock'
-
-const CANNED = [
-  "Bonne question. Reformule-moi d'abord le problème avec tes propres mots : qu'attends-tu exactement en sortie, et qu'obtiens-tu à la place ?",
-  "Je ne vais pas écrire ce code à ta place. Mais dis-moi : que se passe-t-il si tu traces la valeur juste avant l'appel ? Que devrais-tu voir ?",
-  "Le concept sous-jacent ici s'appelle l'ownership de la mémoire. Qui alloue ? Qui libère ? Tant que cette réponse n'est pas nette, le bug reviendra.",
-  "Essaie de réduire le cas au minimum reproductible : trois lignes qui plantent, sans le reste. Tu trouveras souvent la réponse en le faisant.",
-]
+import { aiLevels, skillGraph } from '../data/mock'
+import useAuthUser from '../hooks/useAuthUser'
+import { aiService } from '../services/api'
 
 const SUGGESTIONS = [
   { icon: 'Bug', text: 'Pourquoi mon programme segfault ?' },
@@ -21,11 +16,11 @@ const SUGGESTIONS = [
   { icon: 'Droplet', text: 'Comment traquer une fuite mémoire ?' },
 ]
 
-function Bubble({ m }) {
+function Bubble({ m, me }) {
   if (m.role === 'user') {
     return (
       <div className="flex flex-row-reverse gap-3">
-        <Avatar src={currentUser.avatar} name={currentUser.displayName} size="sm" />
+        <Avatar src={me.avatar} name={me.displayName} size="sm" />
         <div className="max-w-[78%] rounded-xl rounded-tr-sm bg-brand-500/15 px-4 py-3 text-[13.5px] leading-relaxed text-ink">
           {m.text}
         </div>
@@ -77,27 +72,61 @@ function Bubble({ m }) {
 
 export default function Mentor() {
   usePageHeader({ title: 'Assistant IA' })
+  const me = useAuthUser()
 
-  const [messages, setMessages] = useState(aiConversation)
+  const [messages, setMessages] = useState([])
+  const [context, setContext] = useState('minishell')
+  const [stats, setStats] = useState({ queries: 0, level: 'Low' })
   const [draft, setDraft] = useState('')
   const [typing, setTyping] = useState(false)
   const [level, setLevel] = useState(2)
   const scrollRef = useRef(null)
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const d = await aiService.history()
+      setMessages(d?.messages || [])
+      setContext(d?.context?.project || 'minishell')
+      setStats(d?.stats || { queries: 0, level: 'Low' })
+    } catch {
+      setMessages([])
+    }
+  }, [])
+
+  useEffect(() => {
+    loadHistory()
+  }, [loadHistory])
 
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [messages, typing])
 
-  const ask = (text) => {
+  const ask = async (text) => {
     if (!text.trim()) return
     setMessages((m) => [...m, { role: 'user', text: text.trim() }])
     setDraft('')
     setTyping(true)
-    setTimeout(() => {
+    try {
+      const r = await aiService.ask(text.trim(), level)
+      setMessages((m) => [...m, { role: 'ai', ...r }])
+    } catch {
+      setMessages((m) => [
+        ...m,
+        { role: 'ai', text: "L'assistant est momentanément indisponible — réessaie dans un instant." },
+      ])
+    } finally {
       setTyping(false)
-      setMessages((m) => [...m, { role: 'ai', text: CANNED[m.length % CANNED.length] }])
-    }, 1100)
+      setStats((s) => ({ ...s, queries: s.queries + 1 }))
+    }
+  }
+
+  const resetChat = async () => {
+    try {
+      await aiService.reset()
+    } finally {
+      loadHistory()
+    }
   }
 
   const gaps = skillGraph
@@ -118,11 +147,15 @@ export default function Mentor() {
             <div className="min-w-0">
               <h1 className="text-[14px] font-bold text-ink">AI Mentor 2.0</h1>
               <p className="text-[11.5px] text-ink-dim">
-                Guide socratique · contexte : <span className="font-mono text-ink-soft">minishell</span>
+                Guide socratique · contexte : <span className="font-mono text-ink-soft">{context}</span>
               </p>
             </div>
             <Badge tone="brand" className="ml-auto hidden sm:inline-flex">Niveau d'aide {level}/5</Badge>
-            <button className="grid h-8 w-8 place-items-center rounded-md text-ink-dim hover:bg-white/[0.06] hover:text-ink" aria-label="Nouvelle conversation">
+            <button
+              className="grid h-8 w-8 place-items-center rounded-md text-ink-dim hover:bg-white/[0.06] hover:text-ink"
+              aria-label="Nouvelle conversation"
+              onClick={resetChat}
+            >
               <Icon name="RotateCcw" size={15} />
             </button>
           </header>
@@ -136,7 +169,7 @@ export default function Mentor() {
               </p>
             </div>
 
-            {messages.map((m, i) => <Bubble key={i} m={m} />)}
+            {messages.map((m, i) => <Bubble key={i} m={m} me={me} />)}
 
             {typing && (
               <div className="flex gap-3">
@@ -255,10 +288,21 @@ export default function Mentor() {
               <Icon name="ShieldCheck" size={15} className="text-ok" /> AI Dependency
             </h2>
             <div className="mt-3 flex items-baseline gap-2">
-              <span className="font-mono text-[26px] font-extrabold text-ok">Low</span>
-              <span className="text-[11.5px] text-ink-dim">12 requêtes / 30 j.</span>
+              <span
+                className={`font-mono text-[26px] font-extrabold ${
+                  stats.level === 'Low' ? 'text-ok' : stats.level === 'Medium' ? 'text-warn' : 'text-danger'
+                }`}
+              >
+                {stats.level}
+              </span>
+              <span className="text-[11.5px] text-ink-dim">{stats.queries} requête(s) / 30 j.</span>
             </div>
-            <ProgressBar value={18} color="#2ECC71" height={5} className="mt-3" />
+            <ProgressBar
+              value={Math.min(100, stats.queries * 2)}
+              color={stats.level === 'Low' ? '#2ECC71' : stats.level === 'Medium' ? '#F5B942' : '#E5484D'}
+              height={5}
+              className="mt-3"
+            />
             <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
               Une dépendance faible renforce ton Integrity Score et ta crédibilité en peer review.
             </p>

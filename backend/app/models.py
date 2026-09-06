@@ -102,6 +102,9 @@ class User(Base):
     activity: Mapped[list["ActivityEvent"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    ai_messages: Mapped[list["AiMessage"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Project(Base):
@@ -213,6 +216,22 @@ class PeerSlot(Base):
     student: Mapped["User"] = relationship(foreign_keys=[student_id])
     reviewer: Mapped["User | None"] = relationship(foreign_keys=[reviewer_id])
     project: Mapped["Project"] = relationship()
+
+
+class AiMessage(Base):
+    """AI Mentor conversation line (single thread per student)."""
+
+    __tablename__ = "ai_messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: new_id("ai"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String, default="user")  # user | ai
+    text: Mapped[str] = mapped_column(String, default="")
+    extra: Mapped[dict] = mapped_column(JSON, default=dict)  # {list?, footer?, chips?}
+    project: Mapped[str | None] = mapped_column(String, nullable=True)  # slug du contexte
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+    user: Mapped["User"] = relationship(back_populates="ai_messages")
 
 
 class OtpCode(Base):

@@ -42,7 +42,7 @@ http.interceptors.response.use(
 const ALL_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 const ALL_REAL = import.meta.env.VITE_USE_MOCK === 'false'
 const REAL_SERVICES = new Set(
-  (import.meta.env.VITE_REAL_SERVICES || 'auth,projects,dashboard,judge,peer')
+  (import.meta.env.VITE_REAL_SERVICES || 'auth,projects,dashboard,judge,peer,ai')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
@@ -212,18 +212,25 @@ export const peerService = {
 }
 
 /* ------------------------------- AI Mentor ------------------------------- */
+const AI_MOCK_HISTORY = {
+  messages: mock.aiConversation,
+  context: { project: 'minishell' },
+  stats: { queries: 12, level: 'Low' },
+}
+
 export const aiService = {
-  history: () => resolve(mock.aiConversation, () => http.get('/ai/history'), 'ai'),
-  ask: (message) =>
+  history: () => resolve(AI_MOCK_HISTORY, () => http.get('/ai/history'), 'ai'),
+  ask: (message, level) =>
     resolve(
       {
         role: 'ai',
         text: "Bonne question. Avant de te répondre, reformule-moi le problème avec tes propres mots — qu'attends-tu exactement en sortie ?",
       },
-      () => http.post('/ai/ask', { message }),
+      () => http.post('/ai/ask', { message, level }),
       'ai',
     ),
   review: () => resolve(mock.aiCodeReview, () => http.get('/ai/review'), 'ai'),
+  reset: () => resolve({ ok: true }, () => http.post('/ai/reset'), 'ai'),
 }
 
 /* ------------------------------- Analytics ------------------------------- */

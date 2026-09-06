@@ -55,6 +55,10 @@ vérification — inutile de s'inscrire pour tester.
 | POST | `/api/peer-review/{id}/reserve` | Je me propose comme correcteur (niveau ≥ l'étudiant) |
 | POST | `/api/peer-review/{id}/cancel` | J'annule (étudiant) ou je me retire (correcteur → slot redevient open) |
 | POST | `/api/peer-review/{id}/complete` | `{score, comment?}` — ≥75 : projet validé ; sinon échec + pénalité 2 j ; correcteur +20 CP / +50 XP |
+| GET | `/api/ai/history` | Conversation AI Mentor persistée + contexte + stats (AI Dependency 30 j) |
+| POST | `/api/ai/ask` | `{message, level? 1-5}` → réponse socratique contextuelle (jamais la solution) |
+| GET | `/api/ai/review` | AI Code Review de la dernière soumission conclue `{metrics, notes}` |
+| POST | `/api/ai/reset` | Nouvelle conversation |
 | GET | `/api/dashboard/stats` | 4 tuiles KPI (XP, projets, CP, valeur de compte) — calculées en direct |
 | GET | `/api/dashboard/activity` | 5 derniers événements de la timeline |
 | GET | `/api/dashboard/weekly` | Activité des 7 derniers jours |
@@ -90,7 +94,13 @@ backend/
 - `peer.py` — Peer Review : matching 0-100 (niveau 70 % + réputation 30 %),
   cycle de vie des slots (open → reserved → done / cancelled), récompenses
   (+20 CP / +50 XP au correcteur), validation du projet si note ≥ 75.
+- `ai.py` — AI Mentor : moteur socratique par règles (12 sujets C/42 —
+  segfault, pipes/fork, fuites, norme, compilation, pointeurs, threads,
+  printf, EOF, complexité, GNL, refus de solution) avec contexte réel
+  (dernière soumission, tests échoués) et 5 niveaux d'assistance ; AI Code
+  Review calculé sur la dernière soumission conclue (metrics + notes).
+  `ask()` est le point d'attache prévu pour brancher un vrai LLM ensuite.
 
 ## Étapes suivantes (Phase 1)
 
-- Rooms & chat, AI mentor, Leaderboard & Coalitions, Analytics.
+- Rooms & chat, Leaderboard & Coalitions, Analytics.
