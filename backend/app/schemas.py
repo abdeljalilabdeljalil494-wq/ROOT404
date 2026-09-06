@@ -29,3 +29,5 @@ class FileIn(BaseModel):
 
 class SubmitIn(BaseModel):
     files: list[FileIn] = []
+    slug: str | None = None  # used by /judge/run (workspace « Exécuter »)
+    note: str | None = None

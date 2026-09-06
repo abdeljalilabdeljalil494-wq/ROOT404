@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # SQLite out of the box; PostgreSQL in production via DATABASE_URL.
     database_url: str = "sqlite:///./data/root404.db"
 
-    jwt_secret: str = "dev-only-change-me-424242"
+    jwt_secret: str = "dev-only-change-me-424242-root404-secret"  # ≥32 bytes for HS256
     jwt_algorithm: str = "HS256"
     jwt_expires_days: int = 7
 

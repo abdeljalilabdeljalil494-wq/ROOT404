@@ -46,6 +46,7 @@ export default function ProjectDetail() {
   const currentUser = useAuthUser()
   const [tab, setTab] = useState('description')
   const [p, setP] = useState(null)
+  const [lastResult, setLastResult] = useState(null)
 
   // Real project (with the current user's state) from the backend.
   useEffect(() => {
@@ -71,6 +72,19 @@ export default function ProjectDetail() {
     }
   }, [slug])
 
+  /* Last real Moulinette result (404 → null → mock fallback below). */
+  useEffect(() => {
+    let alive = true
+    setLastResult(null)
+    projectService
+      .lastResult(slug)
+      .then((r) => alive && setLastResult(r))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [slug])
+
   usePageHeader(
     { title: p?.name || 'Projet', breadcrumb: [{ label: 'Mes projets', to: '/projects' }, { label: p?.name || 'Projet' }] },
     [p?.slug],
@@ -87,7 +101,8 @@ export default function ProjectDetail() {
     )
   }
 
-  const passed = moulinetteTests.filter((t) => t.status === 'pass').length
+  const tests = lastResult?.tests?.length ? lastResult.tests : moulinetteTests
+  const passed = tests.filter((t) => t.status === 'pass').length
 
   return (
     <div className="container-page py-6">
@@ -329,7 +344,12 @@ export default function ProjectDetail() {
             <h2 className="text-[13px] font-bold text-ink">Validations & XP</h2>
             <ul className="mt-4 space-y-3">
               {[
-                { label: 'Moulinette', value: `${passed}/${moulinetteTests.length}`, tone: 'ok', icon: 'Cpu' },
+                {
+                  label: 'Moulinette',
+                  value: lastResult ? `${lastResult.score}/100` : `${passed}/${tests.length}`,
+                  tone: lastResult ? (lastResult.status === 'passed' ? 'ok' : 'danger') : 'ok',
+                  icon: 'Cpu',
+                },
                 { label: 'Peer Review', value: '2 / 3', tone: 'brand', icon: 'Users' },
                 { label: 'AI Review', value: '81/100', tone: 'info', icon: 'Sparkles' },
                 { label: 'Bonus', value: 'Non tenté', tone: 'muted', icon: 'Gift' },
@@ -352,20 +372,56 @@ export default function ProjectDetail() {
           </section>
 
           <section className="card p-5">
-            <h2 className="text-[13px] font-bold text-ink">Derniers tests Moulinette</h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-[13px] font-bold text-ink">Derniers tests Moulinette</h2>
+              {lastResult && (
+                <Badge tone={lastResult.status === 'passed' ? 'ok' : 'danger'}>
+                  {lastResult.status === 'passed' ? `Passée · ${lastResult.score}/100` : `Échouée · ${lastResult.score}/100`}
+                </Badge>
+              )}
+            </div>
+            {lastResult && (
+              <p className="mt-1.5 font-mono text-[10.5px] text-ink-faint">
+                {lastResult.via === 'docker' ? 'sandbox docker' : 'sandbox local'} ·{' '}
+                {lastResult.at ? new Date(lastResult.at).toLocaleString('fr-FR') : ''}
+              </p>
+            )}
             <ul className="mt-3.5 space-y-2">
-              {moulinetteTests.map((t) => (
+              {tests.map((t) => (
                 <li key={t.name} className="flex items-center gap-2.5 text-[12px]">
                   <Icon
-                    name={t.status === 'pass' ? 'CheckCircle2' : t.status === 'warn' ? 'AlertTriangle' : 'XCircle'}
+                    name={
+                      t.status === 'pass'
+                        ? 'CheckCircle2'
+                        : t.status === 'warn'
+                          ? 'AlertTriangle'
+                          : t.status === 'skip'
+                            ? 'CircleDot'
+                            : 'XCircle'
+                    }
                     size={14}
-                    className={t.status === 'pass' ? 'text-ok' : t.status === 'warn' ? 'text-warn' : 'text-danger'}
+                    className={
+                      t.status === 'pass'
+                        ? 'text-ok'
+                        : t.status === 'warn'
+                          ? 'text-warn'
+                          : t.status === 'skip'
+                            ? 'text-ink-faint'
+                            : 'text-danger'
+                    }
                   />
                   <span className="flex-1 truncate text-ink-soft">{t.name}</span>
                   <span
-                    className={`shrink-0 font-mono text-[11px] ${
-                      t.status === 'pass' ? 'text-ok' : t.status === 'warn' ? 'text-warn' : 'text-danger'
+                    className={`max-w-[88px] shrink-0 truncate font-mono text-[11px] ${
+                      t.status === 'pass'
+                        ? 'text-ok'
+                        : t.status === 'warn'
+                          ? 'text-warn'
+                          : t.status === 'skip'
+                            ? 'text-ink-faint'
+                            : 'text-danger'
                     }`}
+                    title={t.detail}
                   >
                     {t.detail}
                   </span>

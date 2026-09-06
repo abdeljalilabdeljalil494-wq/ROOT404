@@ -4,17 +4,23 @@ Endpoints (contract from frontend/src/services/api.js):
     GET  /projects                 → list (per-user status)
     GET  /projects/{slug}          → single project (404 when unknown)
     POST /projects/{slug}/submit   → {ok, id, status, message}
+                                     (the Judge runs in the background)
+    GET  /projects/{slug}/template   → platform sample code for the workspace
+    GET  /projects/{slug}/last-result → latest judge result (or 404)
 """
+
+import threading
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import models
-from ..core.db import get_db
+from ..core.db import SessionLocal, get_db
 from ..core.security import get_current_user
 from ..schemas import SubmitIn
-from ..services.serializers import project_payload
+from ..services import moulinette
+from ..services.serializers import aware, project_payload, user_payload
 
 router = APIRouter()
 
@@ -99,7 +105,7 @@ def submit_project(
         up.status = "progress"
 
     submission = models.Submission(
-        user_id=user.id, project_id=project.id, files=files, status="pending"
+        user_id=user.id, project_id=project.id, files=files, status="running"
     )
     db.add(submission)
     db.add(models.ActivityEvent(
@@ -107,10 +113,80 @@ def submit_project(
         kind="Soumission en attente", score="En cours", tone="brand", xp=0,
     ))
     db.commit()
+    db.refresh(submission)
+
+    # Judge in the background (own session — the request returns immediately).
+    threading.Thread(
+        target=_judge_background,
+        args=(user.id, project.id, submission.id),
+        daemon=True,
+    ).start()
 
     return {
         "ok": True,
         "id": submission.id,
-        "status": "pending",
-        "message": "Soumission enregistrée — la Moulinette analysera ton code (moteur de jugement en construction).",
+        "status": "running",
+        "message": "Soumission enregistrée — la Moulinette analyse ton code.",
+    }
+
+
+def _judge_background(user_id: str, project_id: str, submission_id: str) -> None:
+    """Worker: run the Moulinette on the stored submission (own DB session)."""
+    db = SessionLocal()
+    try:
+        user = db.get(models.User, user_id)
+        project = db.get(models.Project, project_id)
+        submission = db.get(models.Submission, submission_id)
+        if user is None or project is None or submission is None:
+            return
+        if not submission.files:
+            submission.files = [
+                {"path": t["name"], "content": t["content"]}
+                for t in moulinette.get_template(project.slug)["files"]
+            ]
+        moulinette.run_judge(db, user, project, submission.files, submission=submission)
+    except Exception:
+        import logging
+
+        logging.getLogger("root404.judge").exception("background judge failed")
+        try:
+            sub = db.get(models.Submission, submission_id)
+            if sub is not None and sub.status not in ("passed", "failed"):
+                sub.status = "failed"
+                sub.score = 0
+                sub.tests = [{"name": "Sandbox", "status": "fail", "detail": "erreur interne du juge"}]
+                db.commit()
+        except Exception:
+            db.rollback()
+    finally:
+        db.close()
+
+
+@router.get("/{slug}/template")
+def get_template(slug: str, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _get_project(db, slug)  # 404 when unknown
+    return moulinette.get_template(slug)
+
+
+@router.get("/{slug}/last-result")
+def last_result(slug: str, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = _get_project(db, slug)
+    q = (
+        select(models.Submission)
+        .where(models.Submission.user_id == user.id, models.Submission.project_id == project.id)
+        .order_by(models.Submission.created_at.desc())
+        .limit(1)
+    )
+    sub = db.execute(q).scalar_one_or_none()
+    if sub is None or not sub.tests:
+        raise HTTPException(status_code=404, detail="Aucune soumission jugée pour ce projet.")
+    created = aware(sub.created_at)
+    return {
+        "id": sub.id,
+        "status": sub.status,
+        "score": sub.score,
+        "tests": sub.tests,
+        "terminal": sub.terminal,
+        "via": sub.via,
+        "at": created.isoformat() if created else None,
     }

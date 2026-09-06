@@ -45,7 +45,11 @@ vérification — inutile de s'inscrire pour tester.
 | POST | `/api/auth/logout` | No-op (JWT stateless) |
 | GET | `/api/projects` | Projets du parcours, statut par utilisateur (done / progress / failed / available / locked) |
 | GET | `/api/projects/{slug}` | Détail d'un projet (404 si inconnu) |
-| POST | `/api/projects/{slug}/submit` | Enregistre une soumission `{files: [{path, content}]}` → `pending` (la Moulinette arrive à l'étape suivante) |
+| POST | `/api/projects/{slug}/submit` | Enregistre une soumission `{files: [{path, content}]}` → `running`, la Moulinette l'analyse en arrière-plan (throttle : 1 soumission en cours par projet) |
+| GET | `/api/projects/{slug}/template` | Fichiers de départ du projet `{slug, files: [{name, lang, content}]}` (chargés dans l'éditeur) |
+| GET | `/api/projects/{slug}/last-result` | Dernier résultat de la Moulinette `{status, score, tests, terminal, via, at}` (404 si aucune) |
+| POST | `/api/judge/run` | Workspace « Exécuter » : compile + 1 run → `{lines, exit, via}` |
+| POST | `/api/judge/moulinette/{slug}` | Moulinette complète : `{files?}` → `{tests, score, status, error?, lines, via}` (files → dernière soumission → template) |
 | GET | `/api/dashboard/stats` | 4 tuiles KPI (XP, projets, CP, valeur de compte) — calculées en direct |
 | GET | `/api/dashboard/activity` | 5 derniers événements de la timeline |
 | GET | `/api/dashboard/weekly` | Activité des 7 derniers jours |
@@ -55,19 +59,30 @@ vérification — inutile de s'inscrire pour tester.
 ```text
 backend/
 ├── app/
-│   ├── api/            # Routers (auth, projects, dashboard)
+│   ├── api/            # Routers (auth, projects, dashboard, judge)
 │   ├── core/           # config (pydantic-settings), db (SQLAlchemy), security (JWT/OTP)
-│   ├── services/       # serializers (ORM → JSON), seed (jeu de démo)
+│   ├── services/       # serializers, seed, sandbox, moulinette, templates, progress
 │   ├── models.py       # ORM : User, Project, UserProject, Submission, …
 │   ├── schemas.py      # Schémas Pydantic (requêtes)
 │   └── main.py         # Entrypoint FastAPI + CORS + lifespan (create_all + seed)
-├── Dockerfile
+├── sandbox/Dockerfile  # Image runner (gcc 12, make, valgrind) — build :
+│                       #   docker build -t root404-sandbox -f backend/sandbox/Dockerfile backend/sandbox
 └── requirements.txt
 ```
 
+## Judge / Moulinette (`app/services/`)
+
+- `sandbox.py` — exécution sandboxée **hybride** : Docker
+  (`root404-sandbox`, `--network none --memory 512m --cpus 1 --pids-limit 128
+  --user 65534`) si dispo, sinon repli local avec `rlimits` (512 Mo RAM,
+  12 s CPU, 16 Mo fichiers), timeout 12 s, sorties plafonnées à 1 Mo.
+- `moulinette.py` — suites de tests par projet (compilation
+  `-Wall -Wextra -Werror`, runs, norme statique, valgrind si présent),
+  score `⌊100 × gained/total⌋`, passage si ≥ 95 sans `fail`.
+- `templates.py` — fichiers de départ des 5 projets (C valides, compilables).
+- `progress.py` — XP à la première validation + recalcul du niveau
+  (3860 XP/niveau, max 21).
+
 ## Étapes suivantes (Phase 1)
 
-- **Judge / Moulinette** : exécution sandboxée (Docker si dispo, sinon
-  subprocess isolé avec limites CPU/RAM/réseau) + tests + score.
-  Les soumissions sont déjà persistées en `pending` — rien à migrer.
 - Rooms & chat, AI mentor, Leaderboard & Coalitions, Analytics.

@@ -42,7 +42,7 @@ http.interceptors.response.use(
 const ALL_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 const ALL_REAL = import.meta.env.VITE_USE_MOCK === 'false'
 const REAL_SERVICES = new Set(
-  (import.meta.env.VITE_REAL_SERVICES || 'auth,projects,dashboard')
+  (import.meta.env.VITE_REAL_SERVICES || 'auth,projects,dashboard,judge')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
@@ -140,6 +140,10 @@ export const projectService = {
     ),
   submit: (slug, files) =>
     resolve({ ok: true }, () => http.post(`/projects/${slug}/submit`, { files }), 'projects'),
+  template: (slug) =>
+    resolve(null, () => http.get(`/projects/${slug}/template`), 'projects'),
+  lastResult: (slug) =>
+    resolve(null, () => http.get(`/projects/${slug}/last-result`), 'projects'),
 }
 
 /* -------------------------------- Dashboard ------------------------------ */
@@ -165,10 +169,23 @@ export const roomService = {
 }
 
 /* ---------------------------------- Judge -------------------------------- */
+/* The Moulinette compiles + runs the code (≤ ~20 s worst case) — give these
+   calls a generous per-request timeout. */
+const JUDGE_TIMEOUT = { timeout: 90000 }
+
 export const judgeService = {
-  run: (payload) => resolve({ lines: mock.terminalLines }, () => http.post('/judge/run', payload), 'judge'),
-  moulinette: (slug) =>
-    resolve({ tests: mock.moulinetteTests, score: 98 }, () => http.post(`/judge/moulinette/${slug}`), 'judge'),
+  run: (slug, files) =>
+    resolve(
+      { lines: mock.terminalLines, exit: 0 },
+      () => http.post('/judge/run', { slug, files }, JUDGE_TIMEOUT),
+      'judge',
+    ),
+  moulinette: (slug, files) =>
+    resolve(
+      { tests: mock.moulinetteTests, score: 98, status: 'passed', via: 'local' },
+      () => http.post(`/judge/moulinette/${slug}`, { files }, JUDGE_TIMEOUT),
+      'judge',
+    ),
 }
 
 /* ------------------------------- AI Mentor ------------------------------- */

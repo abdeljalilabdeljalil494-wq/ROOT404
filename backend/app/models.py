@@ -159,6 +159,9 @@ class Submission(Base):
     files: Mapped[list] = mapped_column(JSON, default=list)  # [{path, content}]
     status: Mapped[str] = mapped_column(String, default="pending")  # pending | running | passed | failed
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tests: Mapped[list] = mapped_column(JSON, default=list)   # moulinette rows
+    terminal: Mapped[list] = mapped_column(JSON, default=list)  # terminal lines
+    via: Mapped[str] = mapped_column(String, default="local")  # docker | local
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
     user: Mapped["User"] = relationship(back_populates="submissions")

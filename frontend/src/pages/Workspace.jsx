@@ -7,7 +7,8 @@ import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import Avatar from '../components/ui/Avatar'
 import ProgressBar from '../components/ui/ProgressBar'
-import { fileTree, sampleCode, terminalLines, moulinetteTests, currentUser, aiCodeReview } from '../data/mock'
+import { fileTree, sampleCode, moulinetteTests, currentUser, aiCodeReview } from '../data/mock'
+import { judgeService, projectService } from '../services/api'
 
 /* ------------------------------------------------------------------ */
 /* Monaco theme matching the ROOT 404 palette                          */
@@ -94,14 +95,22 @@ export default function Workspace() {
 
   const [tabs, setTabs] = useState([{ name: 'minishell.c', lang: 'c' }])
   const [activeFile, setActiveFile] = useState('minishell.c')
-  const [code, setCode] = useState(sampleCode)
-  const [lines, setLines] = useState(terminalLines)
+  const [contents, setContents] = useState({})
+  const [tpl, setTpl] = useState(null)
+  const [lines, setLines] = useState([
+    { t: 'out', v: 'Appuie sur « Exécuter » pour compiler et lancer ton code dans le sandbox.' },
+  ])
   const [running, setRunning] = useState(false)
   const [moulinetteOpen, setMoulinetteOpen] = useState(true)
   const [explorerOpen, setExplorerOpen] = useState(false)
   const [panelTab, setPanelTab] = useState('moulinette')
   const [cursor, setCursor] = useState({ line: 1, column: 1 })
+  const [mlTests, setMlTests] = useState(null)
+  const [mlResult, setMlResult] = useState(null)
+  const [judging, setJudging] = useState(false)
   const termRef = useRef(null)
+
+  const code = contents[activeFile] ?? sampleCode
 
   useEffect(() => {
     document.title = `${slug} — Workspace · ROOT 404`
@@ -110,6 +119,28 @@ export default function Workspace() {
   useEffect(() => {
     termRef.current?.scrollTo({ top: termRef.current.scrollHeight })
   }, [lines])
+
+  /* Load the project template → real files in the editor + explorer.
+     (Falls back to the mock sample when the backend is offline / no template.) */
+  useEffect(() => {
+    let alive = true
+    setTpl(null)
+    setMlTests(null)
+    setMlResult(null)
+    projectService
+      .template(slug)
+      .then((t) => {
+        if (!alive || !t?.files?.length) return
+        setTpl(t.files)
+        setTabs(t.files.map((f) => ({ name: f.name, lang: f.lang })))
+        setActiveFile(t.files[0].name)
+        setContents(Object.fromEntries(t.files.map((f) => [f.name, f.content])))
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [slug])
 
   const openFile = useCallback((node) => {
     setTabs((t) => (t.some((x) => x.name === node.name) ? t : [...t, node]))
@@ -126,21 +157,46 @@ export default function Workspace() {
     })
   }
 
-  const run = () => {
+  const currentFiles = useCallback(
+    () => tabs.map((t) => ({ path: t.name, content: contents[t.name] ?? '' })),
+    [tabs, contents],
+  )
+
+  const run = async () => {
     setRunning(true)
+    setMoulinetteOpen(true)
     setPanelTab('moulinette')
-    setLines([{ t: 'cmd', v: '$ make -j4 && ./minishell' }])
-    const seq = terminalLines.slice(1)
-    seq.forEach((l, i) =>
-      setTimeout(() => {
-        setLines((prev) => [...prev, l])
-        if (i === seq.length - 1) setRunning(false)
-      }, 220 * (i + 1)),
-    )
+    setLines([{ t: 'cmd', v: `$ gcc -Wall -Wextra -Werror … (sandbox · ${slug})` }])
+    try {
+      const r = await judgeService.run(slug, currentFiles())
+      setLines(r?.lines?.length ? r.lines : [{ t: 'out', v: '(aucune sortie)' }])
+    } catch (e) {
+      setLines((prev) => [...prev, { t: 'out', v: `erreur : ${e.response?.data?.detail || e.message}` }])
+    } finally {
+      setRunning(false)
+    }
   }
 
-  const passed = moulinetteTests.filter((t) => t.status === 'pass').length
-  const score = Math.round((passed / moulinetteTests.length) * 100)
+  const passMoulinette = async () => {
+    setJudging(true)
+    setMoulinetteOpen(true)
+    setPanelTab('moulinette')
+    try {
+      const r = await judgeService.moulinette(slug, currentFiles())
+      setMlResult(r)
+      setMlTests(r?.tests ?? null)
+      if (r?.lines?.length) setLines(r.lines)
+    } catch (e) {
+      setLines((prev) => [...prev, { t: 'out', v: `moulinette : ${e.response?.data?.detail || e.message}` }])
+    } finally {
+      setJudging(false)
+    }
+  }
+
+  const tests = mlTests ?? moulinetteTests
+  const passed = tests.filter((t) => t.status === 'pass').length
+  const score = mlResult?.score ?? Math.round((passed / tests.length) * 100)
+  const normTest = tests.find((t) => /norm/i.test(t.name))
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-root-900">
@@ -199,9 +255,11 @@ export default function Workspace() {
             </div>
           </div>
           <ul className="flex-1 overflow-y-auto py-2">
-            {fileTree.map((n) => (
-              <TreeNode key={n.name} node={n} activeFile={activeFile} onOpen={openFile} />
-            ))}
+            {(tpl ? tpl.map((f) => ({ type: 'file', name: f.name, lang: f.lang })) : fileTree).map(
+              (n) => (
+                <TreeNode key={n.name} node={n} activeFile={activeFile} onOpen={openFile} />
+              ),
+            )}
           </ul>
           <div className="shrink-0 border-t border-line p-2.5">
             <div className="rounded-md bg-root-800 p-2.5">
@@ -262,7 +320,7 @@ export default function Workspace() {
               <Button size="sm" variant="outline" icon="Play" onClick={run} loading={running}>
                 <span className="hidden sm:inline">Exécuter</span>
               </Button>
-              <Button size="sm" icon="Cpu" onClick={() => { setPanelTab('moulinette'); setMoulinetteOpen(true) }}>
+              <Button size="sm" icon="Cpu" onClick={passMoulinette} loading={judging}>
                 <span className="hidden sm:inline">Passer la Moulinette</span>
                 <span className="sm:hidden">Moulinette</span>
               </Button>
@@ -275,7 +333,7 @@ export default function Workspace() {
               height="100%"
               language="c"
               value={code}
-              onChange={(v) => setCode(v ?? '')}
+              onChange={(v) => setContents((c) => ({ ...c, [activeFile]: v ?? '' }))}
               theme="root404"
               beforeMount={(monaco) => monaco.editor.defineTheme('root404', ROOT_THEME)}
               onMount={(editor) => {
@@ -309,8 +367,26 @@ export default function Workspace() {
 
           {/* Status bar */}
           <div className="flex h-[26px] shrink-0 items-center gap-4 border-t border-line bg-root-950 px-3 font-mono text-[10.5px] text-ink-dim">
-            <span className="flex items-center gap-1.5 text-ok">
-              <Icon name="CircleCheck" size={11} /> Norminette OK
+            <span
+              className={`flex items-center gap-1.5 ${
+                normTest?.status === 'fail'
+                  ? 'text-danger'
+                  : normTest?.status === 'warn'
+                    ? 'text-warn'
+                    : 'text-ok'
+              }`}
+            >
+              <Icon
+                name={normTest?.status === 'fail' ? 'XCircle' : 'CircleCheck'}
+                size={11}
+              />{' '}
+              {normTest
+                ? normTest.status === 'pass'
+                  ? 'Norminette OK'
+                  : normTest.status === 'warn'
+                    ? 'Norminette à revoir'
+                    : 'Norminette échouée'
+                : 'Norminette OK'}
             </span>
             <span className="flex items-center gap-1.5">
               <Icon name="GitBranch" size={11} /> main
@@ -397,20 +473,43 @@ export default function Workspace() {
                       className="mb-3.5"
                     />
                     <ul className="space-y-1.5">
-                      {moulinetteTests.map((t) => (
+                      {tests.map((t) => (
                         <li
                           key={t.name}
+                          title={t.detail}
                           className="flex items-center gap-2 rounded-md border border-line/60 bg-root-850 px-2.5 py-2 text-[11px]"
                         >
                           <Icon
-                            name={t.status === 'pass' ? 'CheckCircle2' : t.status === 'warn' ? 'AlertTriangle' : 'XCircle'}
+                            name={
+                              t.status === 'pass'
+                                ? 'CheckCircle2'
+                                : t.status === 'warn'
+                                  ? 'AlertTriangle'
+                                  : t.status === 'skip'
+                                    ? 'CircleDot'
+                                    : 'XCircle'
+                            }
                             size={13}
-                            className={t.status === 'pass' ? 'text-ok' : t.status === 'warn' ? 'text-warn' : 'text-danger'}
+                            className={
+                              t.status === 'pass'
+                                ? 'text-ok'
+                                : t.status === 'warn'
+                                  ? 'text-warn'
+                                  : t.status === 'skip'
+                                    ? 'text-ink-faint'
+                                    : 'text-danger'
+                            }
                           />
                           <span className="min-w-0 flex-1 truncate text-ink-soft">{t.name}</span>
                           <span
-                            className={`shrink-0 font-mono text-[10px] ${
-                              t.status === 'pass' ? 'text-ok' : t.status === 'warn' ? 'text-warn' : 'text-danger'
+                            className={`max-w-[105px] shrink-0 truncate font-mono text-[10px] ${
+                              t.status === 'pass'
+                                ? 'text-ok'
+                                : t.status === 'warn'
+                                  ? 'text-warn'
+                                  : t.status === 'skip'
+                                    ? 'text-ink-faint'
+                                    : 'text-danger'
                             }`}
                           >
                             {t.detail}

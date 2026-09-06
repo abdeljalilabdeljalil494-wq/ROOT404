@@ -16,7 +16,7 @@ export const currentUser = {
   level: 6.42,
   levelProgress: 42,
   xp: 24780,
-  xpToNext: 3220,
+  xpToNext: 2240,
   projectsDone: 38,
   correctionPoints: 1250,
   accountValue: 2450,

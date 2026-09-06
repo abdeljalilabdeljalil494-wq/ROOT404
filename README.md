@@ -653,9 +653,29 @@ npm install
 npm run dev                     # http://localhost:5173 — le proxy /api → :8000 est déjà configuré
 ```
 
-Les services `auth`, `projects` et `dashboard` consomment l'API réelle ; les
-autres services restent sur leurs données mock jusqu'à la construction de
-leurs endpoints (repli automatique sur le mock si le backend est hors ligne).
+Les services `auth`, `projects`, `dashboard` et `judge` consomment l'API
+réelle ; les autres services restent sur leurs données mock jusqu'à la
+construction de leurs endpoints (repli automatique sur le mock si le backend
+est hors ligne).
+
+### 🧪 Judge / Moulinette
+
+Chaque soumission passe par le sandbox :
+
+```text
+POST /api/judge/run               {slug, files?}  → {lines, exit, via}   (workspace « Exécuter »)
+POST /api/judge/moulinette/{slug} {files?}        → {tests, score, …}    (moulinette complète)
+GET  /api/projects/{slug}/template                → fichiers de départ   (chargés dans l'éditeur)
+GET  /api/projects/{slug}/last-result             → dernier résultat     (fiche projet)
+```
+
+- **Sandbox hybride** : Docker (`root404-sandbox`, `--network none --memory 512m
+  --cpus 1 --pids-limit 128 --user 65534`) ; sans Docker, repli local avec
+  `rlimits` (512 Mo RAM, 12 s CPU, 16 Mo fichiers), timeout 12 s.
+- **Compilation** : `gcc -Wall -Wextra -Werror` (gates — échec ⇒ score 0).
+  Un harness est injecté seulement si le dépôt de l'étudiant n'a pas de `main()`.
+- **Note** : `⌊100 × points_gagnés / points_totaux⌋` ; passage si ≥ 95,
+  aucun `fail` et compilation OK. Première validation du projet ⇒ XP + niveau.
 
 ---
 
@@ -666,21 +686,24 @@ leurs endpoints (repli automatique sur le mock si le backend est hors ligne).
 - [x] Dashboard — stats, activité & hebdo calculés en direct
 - [x] Projects & Path System — statuts par utilisateur + soumissions en file
 - [x] Monaco Code Editor
-- [ ] Docker/Ubuntu Sandbox
-- [ ] Moulinette / Judge Engine
+- [x] Sandbox hybride — Docker (`--network none`, 512 Mo, 1 vCPU) avec repli local (rlimits) si Docker absent
+- [x] Moulinette / Judge Engine — compilation `-Wall -Wextra -Werror` + suites de tests par projet (norme, runs, valgrind si présent)
 - [ ] AI Mentor الأساسي
 - [ ] Peer Review
 - [ ] Collaboration Rooms
-- [ ] XP / Level System
+- [x] XP / Level System — XP à la première validation + recalcul de niveau (3860 XP/niveau, max 21)
 - [ ] Leaderboard
 - [ ] Basic Profile
 
-> **Statut (06/09/2026)** : le backend FastAPI est en ligne pour le cœur du
-> MVP (Auth, Projects, Dashboard) et le frontend est branché dessus. Les UI
-> des autres systèmes Phase 1 existent déjà (mock) et seront branchées aux
-> endpoints backend dans les étapes suivantes — la prochaine étape est le
-> **Judge / Moulinette** (exécution sandboxée + tests), les soumissions étant
-> déjà persistées en `pending`.
+> **Statut (06/09/2026)** : le cœur du MVP est en ligne — Auth, Projects,
+> Dashboard **et le Judge / Moulinette** : la soumission (workspace ou
+> `POST /projects/{slug}/submit`) est compilée et exécutée dans le sandbox
+> (Docker si disponible, sinon local avec rlimits), notée sur 100, et
+> l'XP/niveau sont mis à jour. Frontend branché : « Exécuter » et « Passer la
+> Moulinette » du workspace appellent l'API réelle, et la fiche projet
+> affiche le dernier résultat. Les UI des autres systèmes Phase 1 (AI, Peer
+> Review, Rooms, Leaderboard…) existent déjà en mock et seront branchées aux
+> étapes suivantes.
 
 ### Phase 2 — Learning Intelligence
 - [ ] Code Journey

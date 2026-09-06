@@ -59,7 +59,8 @@ MAIN_STUDENT = dict(
     avatar="https://i.pravatar.cc/160?img=13",
     bio="Étudiant en systèmes & réseaux. J'aime le C, les pointeurs et les segfaults à 3h du matin.",
     github="abdeljalil", discord="abdeljalil#404", site="root404.tn/u/abdeljalil",
-    level=6.42, level_progress=42, xp=24780, xp_to_next=3220, projects_done=38,
+    # level = xp / 3860 → 6.42 ; progress = (xp % 3860) / 3860 → 42 %
+    level=6.42, level_progress=42, xp=24780, xp_to_next=2240, projects_done=38,
     correction_points=1250, account_value=2450, jetons=4, streak=24,
     accuracy=81, reputation=88, integrity=96,
     blackhole_days_left=87, blackhole_total=120,
@@ -175,6 +176,10 @@ def seed_if_empty() -> bool:
             ))
 
         # --- A few past submissions (history) ------------------------------
+        # Files carry the platform template content (what the student's repo
+        # looked like), so a re-run of the Moulinette judges real code.
+        from . import moulinette
+
         sub_specs = [
             ("get_next_line", "passed", 100, 48),
             ("ft_printf", "passed", 115, 70),
@@ -182,13 +187,23 @@ def seed_if_empty() -> bool:
             ("minishell", "pending", None, 22),
         ]
         for i, (slug, status, score, hours_ago) in enumerate(sub_specs):
+            tpl = [
+                {"path": t["name"], "content": t["content"]}
+                for t in moulinette.get_template(slug)["files"]
+            ]
             db.add(models.Submission(
                 id=f"s_{i + 1:03d}",
                 user_id=main.id,
                 project_id=projects[slug].id,
-                files=[{"path": "src/main.c", "content": "// seed history"}],
+                files=tpl,
                 status=status,
                 score=score,
+                tests=[
+                    {"name": "Compilation (gcc -Wall -Wextra -Werror)", "status": "pass" if score and score > 50 else "fail", "detail": "OK" if score and score > 50 else "erreur"},
+                    {"name": "Norme (analyse statique)", "status": "pass", "detail": "1 fichier(s) OK"},
+                ],
+                terminal=[{"t": "cmd", "v": "$ make -j4"}, {"t": "out", "v": "build history"}],
+                via="local",
                 created_at=now - timedelta(hours=hours_ago),
             ))
 
