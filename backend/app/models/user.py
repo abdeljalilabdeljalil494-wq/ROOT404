@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, JSON, Text
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, JSON, Text, Index, CheckConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
@@ -9,61 +9,73 @@ def gen_id():
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index('idx_user_username', 'username'),
+        Index('idx_user_email', 'email'),
+        Index('idx_user_campus', 'campus'),
+        Index('idx_user_level', 'level'),
+        Index('idx_user_is_active', 'is_active'),
+        Index('idx_user_coalition', 'coalition_id'),
+        CheckConstraint('level >= 0 AND level <= 21', name='check_level_range'),
+        CheckConstraint('xp >= 0', name='check_xp_positive'),
+        CheckConstraint('reputation >= 0 AND reputation <= 100', name='check_reputation_range'),
+        CheckConstraint('integrity_score >= 0 AND integrity_score <= 100', name='check_integrity_range'),
+    )
     
-    id = Column(String, primary_key=True, default=gen_id)
-    username = Column(String, unique=True, index=True, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=False)
-    display_name = Column(String, nullable=False)
-    full_name = Column(String, nullable=True)
-    hashed_password = Column(String, nullable=True)  # Optional since OTP auth
-    avatar_url = Column(String, nullable=True)
+    id = Column(String(32), primary_key=True, default=gen_id)
+    username = Column(String(30), unique=True, index=True, nullable=False)
+    email = Column(String(254), unique=True, index=True, nullable=False)
+    display_name = Column(String(50), nullable=False)
+    full_name = Column(String(100), nullable=True)
+    hashed_password = Column(String(255), nullable=True)
+    avatar_url = Column(String(500), nullable=True)
     bio = Column(Text, nullable=True)
     
-    # Academic
-    level = Column(Float, default=0.0)
-    xp = Column(Integer, default=0)
-    xp_to_next = Column(Integer, default=1000)
-    projects_done = Column(Integer, default=0)
-    correction_points = Column(Integer, default=0)
-    account_value = Column(Integer, default=0)
-    jetons = Column(Integer, default=0)
-    streak = Column(Integer, default=0)
-    accuracy = Column(Integer, default=0)
-    reputation = Column(Integer, default=50)
-    integrity_score = Column(Integer, default=100)
+    # Academic with constraints
+    level = Column(Float, default=0.0, nullable=False, index=True)
+    xp = Column(Integer, default=0, nullable=False)
+    xp_to_next = Column(Integer, default=1000, nullable=False)
+    projects_done = Column(Integer, default=0, nullable=False)
+    correction_points = Column(Integer, default=0, nullable=False)
+    account_value = Column(Integer, default=0, nullable=False)
+    jetons = Column(Integer, default=0, nullable=False)
+    streak = Column(Integer, default=0, nullable=False)
+    accuracy = Column(Integer, default=0, nullable=False)
+    reputation = Column(Integer, default=50, nullable=False)
+    integrity_score = Column(Integer, default=100, nullable=False)
     
     # Campus & coalition
-    campus = Column(String, default="Tunis")
-    coalition_id = Column(String, nullable=True)
+    campus = Column(String(20), default="Tunis", nullable=False, index=True)
+    coalition_id = Column(String(32), nullable=True, index=True)
     
     # Black Hole
-    blackhole_days_left = Column(Integer, default=120)
-    blackhole_total = Column(Integer, default=120)
-    blackhole_warning = Column(Boolean, default=False)
-    last_activity = Column(DateTime, default=datetime.utcnow)
+    blackhole_days_left = Column(Integer, default=120, nullable=False)
+    blackhole_total = Column(Integer, default=120, nullable=False)
+    blackhole_warning = Column(Boolean, default=False, nullable=False)
+    last_activity = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     
     # Status
-    is_active = Column(Boolean, default=True)
-    is_admin = Column(Boolean, default=False)
-    is_mentor = Column(Boolean, default=False)
-    is_verified = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    is_admin = Column(Boolean, default=False, nullable=False)
+    is_mentor = Column(Boolean, default=False, nullable=False)
+    is_verified = Column(Boolean, default=False, nullable=False)
     
     # Piscine
-    piscine_status = Column(String, default="not_started")  # not_started, in_progress, completed, failed
-    piscine_score = Column(Integer, default=0)
+    piscine_status = Column(String(20), default="not_started", nullable=False)
+    piscine_score = Column(Integer, default=0, nullable=False)
     
-    # JSON fields for flexibility
-    skills = Column(JSON, default=dict)  # Skill graph
-    badges = Column(JSON, default=list)
-    socials = Column(JSON, default=dict)
+    # JSON fields
+    skills = Column(JSON, default=dict, nullable=False)
+    badges = Column(JSON, default=list, nullable=False)
+    socials = Column(JSON, default=dict, nullable=False)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
-    # Relationships
-    submissions = relationship("Submission", back_populates="user", cascade="all, delete-orphan")
-    corrections_given = relationship("Correction", foreign_keys="Correction.corrector_id", back_populates="corrector")
-    corrections_received = relationship("Correction", foreign_keys="Correction.author_id", back_populates="author")
+    # Relationships with proper cascading
+    submissions = relationship("Submission", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    corrections_given = relationship("Correction", foreign_keys="Correction.corrector_id", back_populates="corrector", cascade="all, delete-orphan", passive_deletes=True)
+    corrections_received = relationship("Correction", foreign_keys="Correction.author_id", back_populates="author", cascade="all, delete-orphan", passive_deletes=True)
 
     def to_dict(self):
         return {
@@ -90,7 +102,7 @@ class User(Base):
             "isMentor": self.is_mentor,
             "isAdmin": self.is_admin,
             "joined": self.created_at.strftime("%b. %Y") if self.created_at else "",
-            "bio": self.bio,
+            "bio": self.bio[:1000] if self.bio else None,  # Truncate for safety
             "socials": self.socials or {},
             "skills": self.skills or {},
             "badges": self.badges or []

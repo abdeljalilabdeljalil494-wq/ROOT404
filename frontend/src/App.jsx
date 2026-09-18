@@ -4,6 +4,7 @@ import { Route, Routes, useLocation } from 'react-router-dom'
 import PublicLayout from './layouts/PublicLayout'
 import AppLayout from './layouts/AppLayout'
 import Home from './pages/Home'
+import ErrorBoundary from './components/ui/ErrorBoundary'
 
 /* Code-split every non-landing route */
 const About = lazy(() => import('./pages/About'))
@@ -56,7 +57,10 @@ function RouteFallback() {
 
 export default function App() {
   return (
-    <>
+    <ErrorBoundary
+      fallbackTitle="Erreur critique de l'application"
+      fallbackMessage="Une erreur inattendue a bloqué l'application. Veuillez recharger la page."
+    >
       <ScrollToTop />
       <Suspense fallback={<RouteFallback />}>
         <Routes>
@@ -81,8 +85,17 @@ export default function App() {
           <Route path="/workspace" element={<Workspace />} />
           <Route path="/workspace/:slug" element={<Workspace />} />
 
-          {/* Authenticated app */}
-          <Route element={<AppLayout />}>
+          {/* Authenticated app with error boundary */}
+          <Route
+            element={
+              <ErrorBoundary
+                fallbackTitle="Erreur dans l'espace étudiant"
+                fallbackMessage="Impossible de charger cette section. Réessayez ou retournez au tableau de bord."
+              >
+                <AppLayout />
+              </ErrorBoundary>
+            }
+          >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:slug" element={<ProjectDetail />} />
@@ -106,6 +119,6 @@ export default function App() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
-    </>
+    </ErrorBoundary>
   )
 }

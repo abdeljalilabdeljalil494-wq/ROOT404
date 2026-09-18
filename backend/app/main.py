@@ -1,122 +1,50 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from contextlib import asynccontextmanager
 import time
 import logging
+import os
 
-from app.core.config import settings
+from app.core.config import settings, get_safe_database_url
 from app.core.database import init_db
 from app.api.router import api_router
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with security considerations
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    version=settings.VERSION,
-    description=settings.DESCRIPTION,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json"
-)
+# Security: Don't log sensitive data
+if settings.ENVIRONMENT == "production":
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Rate limiting middleware (simple)
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    response.headers["X-Process-Time"] = str(process_time)
-    
-    # Log audit for sensitive actions
-    if request.url.path.startswith("/api/") and request.method in ["POST", "PUT", "DELETE"]:
-        logger.info(f"{request.method} {request.url.path} - {process_time:.3f}s - {request.client.host if request.client else 'unknown'}")
-    
-    return response
-
-# Exception handlers
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail, "status": exc.status_code}
-    )
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=422,
-        content={"detail": exc.errors(), "body": exc.body}
-    )
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error", "error": str(exc) if settings.PROJECT_NAME else "Unknown"}
-    )
-
-# Include API router
-app.include_router(api_router, prefix=settings.API_V1_PREFIX)
-
-# Root endpoints
-@app.get("/")
-def root():
-    return {
-        "name": settings.PROJECT_NAME,
-        "version": settings.VERSION,
-        "description": settings.DESCRIPTION,
-        "docs": "/api/docs",
-        "health": "/api/health",
-        "status": "running"
-    }
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "version": settings.VERSION}
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}")
-    logger.info(f"Database: {settings.DATABASE_URL[:30]}...")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION} in {settings.ENVIRONMENT} mode")
+    logger.info(f"Database: {get_safe_database_url()}")
     logger.info(f"CORS Origins: {settings.CORS_ORIGINS}")
     
-    # Initialize DB
     try:
         init_db()
-        logger.info("Database initialized")
+        logger.info("Database initialized successfully")
         
         # Seed default data
         from app.core.database import SessionLocal
-        from app.models.coalition import Coalition
         from app.services.coalition import CoalitionService
         
         db = SessionLocal()
         try:
             CoalitionService.seed_default_coalitions(db)
             
-            # Seed projects if empty
             from app.models.project import Project
             if db.query(Project).count() == 0:
                 logger.info("Seeding default projects...")
-                # Call seed endpoint logic
-                from app.api.projects import seed_projects
-                # Manually seed
                 default_projects = [
                     {"slug": "get_next_line", "name": "get_next_line", "description": "Lis une ligne depuis un file descriptor, sans jamais perdre le fil.", "level": "Niveau 1", "level_value": 1.0, "lang": "C", "lang_color": "#3B9EFF", "tags": ["Solo", "I/O", "Buffer"], "xp": 1200, "duration": "1 sem.", "difficulty": 2, "status_default": "done"},
                     {"slug": "ft_printf", "name": "ft_printf", "description": "Recode la fonction variadique la plus utilisée de la libc.", "level": "Niveau 2", "level_value": 2.0, "lang": "C", "lang_color": "#3B9EFF", "tags": ["Solo", "Variadic", "Parsing"], "xp": 1500, "duration": "2 sem.", "difficulty": 3, "status_default": "done"},
@@ -135,7 +63,6 @@ async def startup_event():
                 db.commit()
                 logger.info("Projects seeded")
             
-            # Seed demo user if empty
             from app.models.user import User
             from app.services.skill_graph import SkillGraphService
             if db.query(User).count() == 0:
@@ -164,11 +91,10 @@ async def startup_event():
                 )
                 db.add(demo)
                 db.commit()
-                # Assign coalition
                 try:
                     CoalitionService.assign_user_to_coalition(demo, db)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to assign coalition to demo user: {e}")
                 logger.info("Demo user seeded")
                 
         finally:
@@ -176,12 +102,185 @@ async def startup_event():
             
     except Exception as e:
         logger.error(f"Failed to initialize DB: {e}", exc_info=True)
-
-@app.on_event("shutdown")
-async def shutdown_event():
+        if settings.ENVIRONMENT == "production":
+            raise
+    
+    yield
+    
+    # Shutdown
     logger.info("Shutting down ROOT 404 API")
+
+# Create FastAPI app with lifespan
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    description=settings.DESCRIPTION + f"\n\nEnvironment: {settings.ENVIRONMENT}",
+    docs_url="/api/docs" if settings.ENVIRONMENT != "production" else None,
+    redoc_url="/api/redoc" if settings.ENVIRONMENT != "production" else None,
+    openapi_url="/api/openapi.json",
+    lifespan=lifespan
+)
+
+# Security Headers Middleware
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    
+    if settings.ENABLE_SECURITY_HEADERS:
+        # Prevent XSS
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        
+        # HSTS (only in production with HTTPS)
+        if settings.ENVIRONMENT == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        
+        # CSP
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;"
+        
+        # Referrer Policy
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        
+        # Permissions Policy
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        
+        # Don't expose server info
+        response.headers["Server"] = "ROOT404"
+    
+    return response
+
+# Request size limiting and logging middleware
+@app.middleware("http")
+async def request_middleware(request: Request, call_next):
+    start_time = time.time()
+    
+    # Limit request size (10MB max)
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            size = int(content_length)
+            if size > 10 * 1024 * 1024:  # 10MB
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "Request too large. Max 10MB."}
+                )
+        except ValueError:
+            pass
+    
+    # Get client IP for logging
+    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or \
+                request.headers.get("X-Real-IP", "") or \
+                (request.client.host if request.client else "unknown")
+    
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        logger.error(f"Unhandled error for {request.method} {request.url.path} from {client_ip}: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"}
+        )
+    
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = f"{process_time:.3f}"
+    response.headers["X-Request-ID"] = os.urandom(8).hex()
+    
+    # Audit log for sensitive actions
+    if request.url.path.startswith("/api/") and request.method in ["POST", "PUT", "DELETE"]:
+        logger.info(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.3f}s - {client_ip}")
+    
+    return response
+
+# CORS - Strict configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-Request-ID"],
+    max_age=600,
+)
+
+# Exception handlers with security
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # Don't leak internal details
+    detail = exc.detail
+    if exc.status_code == 500 and settings.ENVIRONMENT == "production":
+        detail = "Internal server error"
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": detail, "status": exc.status_code}
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Sanitize validation errors to prevent info leakage
+    errors = []
+    for err in exc.errors():
+        # Remove potentially sensitive info
+        safe_err = {
+            "type": err.get("type"),
+            "loc": err.get("loc"),
+            "msg": err.get("msg")
+        }
+        errors.append(safe_err)
+    
+    return JSONResponse(
+        status_code=422,
+        content={"detail": errors, "message": "Validation error"}
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    
+    # Don't leak details in production
+    if settings.ENVIRONMENT == "production":
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"}
+        )
+    else:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error", "error": str(exc)[:200]}
+        )
+
+# Include API router
+app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+# Root endpoints
+@app.get("/", tags=["Root"])
+def root():
+    return {
+        "name": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "description": settings.DESCRIPTION,
+        "environment": settings.ENVIRONMENT,
+        "docs": "/api/docs" if settings.ENVIRONMENT != "production" else "Disabled in production",
+        "health": "/api/health",
+        "status": "running"
+    }
+
+@app.get("/health", tags=["Root"])
+def health():
+    return {
+        "status": "ok",
+        "version": settings.VERSION,
+        "environment": settings.ENVIRONMENT,
+        "timestamp": time.time()
+    }
 
 # For running with uvicorn directly
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.ENVIRONMENT != "production",
+        log_level="info"
+    )

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, JSON, Text, ForeignKey
+from sqlalchemy import Column, String, Integer, Float, DateTime, JSON, Text, ForeignKey, Index, CheckConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
@@ -9,33 +9,35 @@ def gen_id():
 
 class Submission(Base):
     __tablename__ = "submissions"
+    __table_args__ = (
+        Index('idx_submission_user', 'user_id'),
+        Index('idx_submission_project', 'project_id'),
+        Index('idx_submission_user_project', 'user_id', 'project_id'),
+        Index('idx_submission_status', 'status'),
+        Index('idx_submission_created', 'created_at'),
+        CheckConstraint('score IS NULL OR (score >= 0 AND score <= 100)', name='check_score_range'),
+    )
     
-    id = Column(String, primary_key=True, default=gen_id)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    id = Column(String(32), primary_key=True, default=gen_id)
+    user_id = Column(String(32), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(String(32), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     
-    # Code
-    files = Column(JSON, default=dict)  # {filename: content}
-    language = Column(String, default="c")
+    files = Column(JSON, default=dict, nullable=False)
+    language = Column(String(20), default="c", nullable=False)
     
-    # Moulinette results
-    status = Column(String, default="pending")  # pending, running, success, failed
+    status = Column(String(20), default="pending", nullable=False, index=True)
     score = Column(Integer, nullable=True)
-    tests = Column(JSON, default=list)  # [{name, status, detail}]
+    tests = Column(JSON, default=list, nullable=False)
     logs = Column(Text, nullable=True)
     
-    # AI review
     ai_review = Column(JSON, nullable=True)
     
-    # Integrity
-    similarity_score = Column(Float, default=0.0)
-    integrity_flags = Column(JSON, default=list)
+    similarity_score = Column(Float, default=0.0, nullable=False)
+    integrity_flags = Column(JSON, default=list, nullable=False)
     
-    # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
-    # Relationships
     user = relationship("User", back_populates="submissions")
     project = relationship("Project", back_populates="submissions")
-    corrections = relationship("Correction", back_populates="submission", cascade="all, delete-orphan")
+    corrections = relationship("Correction", back_populates="submission", cascade="all, delete-orphan", passive_deletes=True)
