@@ -31,6 +31,14 @@ export const SIDEBAR_GROUPS = [
       { label: 'Skill Graph', to: '/skills', icon: 'Network' },
       { label: 'Analytics 360°', to: '/analytics', icon: 'BarChart3' },
       { label: 'ROOT Arena', to: '/arena', icon: 'Swords' },
+      { label: 'Exam Mode', to: '/exam', icon: 'ShieldAlert' },
+    ],
+  },
+  {
+    title: 'Professionnel',
+    items: [
+      { label: 'Emploi & Hiring', to: '/hiring', icon: 'Briefcase' },
+      { label: 'Portfolio', to: '/portfolio', icon: 'Globe' },
     ],
   },
   {

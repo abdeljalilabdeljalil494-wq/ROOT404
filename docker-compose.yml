@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: root404_db
+    environment:
+      POSTGRES_USER: root404
+      POSTGRES_PASSWORD: root404_secret
+      POSTGRES_DB: root404
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root404"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis for OTP and caching (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: root404_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: root404_backend
+    environment:
+      DATABASE_URL: postgresql://root404:root404_secret@db:5432/root404
+      SECRET_KEY: root404-prod-secret-key-change-me-32chars-min!
+      CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000"]'
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+    restart: unless-stopped
+
+  # Judge Runner (for isolated execution)
+  judge:
+    build:
+      context: ./judge_sandbox
+      dockerfile: Dockerfile.runner
+    container_name: root404_judge
+    environment:
+      JUDGE_ENABLED: "true"
+    volumes:
+      - judge_workspace:/workspace
+    # Security hardening
+    read_only: true
+    tmpfs:
+      - /tmp
+    # No network for security
+    networks:
+      - no_internet
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: root404_frontend
+    ports:
+      - "5173:80"
+    environment:
+      VITE_API_URL: http://localhost:8000/api
+      VITE_API_TARGET: http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  judge_workspace:
+
+networks:
+  default:
+    name: root404_network
+  no_internet:
+    internal: true
+    name: root404_no_internet

@@ -31,6 +31,8 @@ const Mentor = lazy(() => import('./pages/Mentor'))
 const Profile = lazy(() => import('./pages/Profile'))
 const Portfolio = lazy(() => import('./pages/Portfolio'))
 const Settings = lazy(() => import('./pages/Settings'))
+const Hiring = lazy(() => import('./pages/Hiring'))
+const Exam = lazy(() => import('./pages/Exam'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
 function ScrollToTop() {
@@ -97,6 +99,8 @@ export default function App() {
             <Route path="/mentor" element={<Mentor />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/hiring" element={<Hiring />} />
+            <Route path="/exam" element={<Exam />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />

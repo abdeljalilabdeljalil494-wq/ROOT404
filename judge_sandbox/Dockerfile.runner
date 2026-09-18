@@ -1,0 +1,38 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install compilers and tools
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
+    g++ \
+    clang \
+    make \
+    valgrind \
+    python3 \
+    python3-pip \
+    nodejs \
+    npm \
+    git \
+    curl \
+    time \
+    && rm -rf /var/lib/apt/lists/*
+
+# Security: create unprivileged user
+RUN useradd -m -s /bin/bash judge && \
+    mkdir -p /workspace && \
+    chown judge:judge /workspace
+
+# Copy runners
+WORKDIR /app
+COPY runner.py .
+COPY runners/ ./runners/
+
+# Harden: no network, limited resources will be set via docker run flags
+USER judge
+WORKDIR /workspace
+
+# Default command runs the judge
+ENTRYPOINT ["python3", "/app/runner.py"]
