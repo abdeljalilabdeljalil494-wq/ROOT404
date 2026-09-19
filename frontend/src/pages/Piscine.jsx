@@ -1,6 +1,5 @@
 import usePageHeader from '../hooks/usePageHeader'
 import Icon from '../components/ui/Icon'
-import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import ProgressBar from '../components/ui/ProgressBar'
 import { piscineDays, piscineStats } from '../data/mock'

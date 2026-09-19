@@ -41,7 +41,7 @@ backend-setup:
 	$(VPIP) install -r backend/requirements.txt -r backend/requirements-dev.txt
 
 backend-test:
-	cd backend && .venv/bin/python -m pytest
+	cd backend && .venv/bin/python -m pytest tests -v
 
 backend-run:
 	cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000

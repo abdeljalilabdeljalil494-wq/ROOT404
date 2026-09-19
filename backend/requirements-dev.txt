@@ -1,8 +1,8 @@
 # ROOT 404 — backend development & test dependencies
 # Includes the runtime dependencies plus the test toolchain.
 #
-# Install:  .venv/bin/pip install -r requirements-dev.txt          (Linux/macOS)
-#           .venv\Scripts\python -m pip install -r requirements-dev.txt   (Windows)
+# Install:  .venv/bin/pip install -r requirements-dev.txt                (Linux/macOS)
+#           .venv\Scripts\python -m pip install -r requirements-dev.txt (Windows)
 
 -r requirements.txt
 

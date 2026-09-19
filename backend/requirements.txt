@@ -4,8 +4,8 @@
 # local installs, CI and the Docker image resolve identically.
 #
 # Install:  python -m venv .venv
-#           .venv/bin/pip install -r requirements.txt          (Linux/macOS)
-#           .venv\Scripts\python -m pip install -r requirements.txt   (Windows)
+#           .venv/bin/pip install -r requirements.txt                (Linux/macOS)
+#           .venv\Scripts\python -m pip install -r requirements.txt  (Windows)
 #
 # Test/dev tooling lives in requirements-dev.txt.
 
@@ -14,3 +14,12 @@ pydantic==2.13.5
 pydantic-settings==2.15.0
 uvicorn[standard]==0.53.0
 PyJWT==2.14.0
+
+# Database & cache (PostgreSQL in production/Compose; SQLite for local dev)
+SQLAlchemy==2.0.54
+psycopg2-binary==2.9.13
+redis==8.1.0
+
+# Auth
+bcrypt==5.0.0
+email-validator==2.3.0

@@ -19,6 +19,24 @@
 
 دليل عملي كامل لتشغيل المشروع على **Windows (PowerShell)** و **Linux/macOS**.
 
+### 🧭 حالة التنفيذ (What is real vs. planned)
+
+| المكوّن | الحالة | التفاصيل |
+|---|---|---|
+| واجهة React كاملة (Landing + App + IDE UI) | ✅ مُنفّذة (بيانات تجريبية `mock`) | `VITE_USE_MOCK=false` للتحويل نحو الـ API الحقيقي |
+| FastAPI: `/api/health` مع فحص DB + Redis | ✅ مُنفّذة | `200 ok` / `200 degraded` / `503 unhealthy` |
+| Auth: تسجيل + دخول + bcrypt + JWT | ✅ مُنفّذة | `/api/auth/register`, `/api/auth/login`, `/api/auth/me` |
+| حماية المسارات (frontend `RequireAuth`) | ✅ مُنفّذة | إعادة التوجيه إلى `/login` بدون توكن |
+| Projects + Submissions | ✅ مُنفّذة | `GET /api/projects`, `POST /api/projects/{slug}/submissions`, `GET /api/submissions/mine` |
+| PostgreSQL + Redis عبر Compose | ✅ مُنفّذة | healthchecks + تهيئة/seed عند الإقلاع (idempotent) |
+| Rate limiting + رؤوس أمان + حد حجم الطلبات | ✅ مُنفّذة | لكل IP، قابلة للضبط عبر البيئة |
+| الاختبارات: 49 backend + 22 frontend | ✅ مُنفّذة | `pytest tests -v` / `npm run test:run` |
+| CI على GitHub Actions | ✅ مُنفّذة | lint + tests + build + compose + صور Docker |
+| Moulinette / Judge داخل Docker | 🚧 مخطط | انظر خارطة الطريق — لا يوجد تنفيذ بعد |
+| OTP عبر البريد، AI Mentor، WebRTC، Coalitions | 🚧 مخطط | الواجهة تعرض بيانات تجريبية فقط لهذه الأجزاء |
+
+> **ملاحظة أمان مهمة:** محرك تنفيذ الكود (Judge/Sandbox) **غير موجود بعد**. عند بنائه يجب عزل الحاوية بدون شبكة خارجية وبدون `seccomp:unconfined`/`apparmor:unconfined`، مع حدود CPU/RAM — هذه متطلبات لن يتم التنازل عنها.
+
 ### 0) المتطلبات (Prerequisites)
 
 | الأداة | الإصدار | ملاحظات |
@@ -26,51 +44,49 @@
 | Node.js + npm | 20+ | للواجهة الأمامية (`node -v`) |
 | Python | 3.11+ | للـ backend (`python --version`) |
 | Docker Desktop | 4.x+ | **يجب أن يكون شغّالاً** قبل أي أمر `docker compose` |
-| Git | أي إصدار حديث | |
 
-> **Docker Desktop على Windows/Linux:** تأكد أنه يعمل (أيقونة الحوت في شريط المهام) قبل تشغيل `docker compose ...`، وإلا ستحصل على خطأ اتصال مثل `Cannot connect to the Docker daemon`.
+> **Docker Desktop على Windows/Linux:** تأكد أنه يعمل قبل تشغيل `docker compose ...` وإلا ستحصل على `Cannot connect to the Docker daemon`.
 
-### 1) إعداد متغيرات البيئة (Environment variables)
+### 1) متغيرات البيئة والأسرار (Environment & secrets)
 
-ملف `.env` لا يُرفع أبدًا إلى Git (متجاهل في `.gitignore`). أنشئه من القالب:
+ملف `.env` لا يُرفع أبدًا إلى Git (متجاهل في `.gitignore`). أنشئه من القالب ثم املأ القيمتين الإلزاميتين:
 
 ```powershell
 # Windows PowerShell
 Copy-Item .env.example .env
+python -c "import secrets; print(secrets.token_urlsafe(48))"   # SECRET_KEY
+python -c "import secrets; print(secrets.token_urlsafe(32))"   # POSTGRES_PASSWORD
 ```
 
 ```bash
 # Linux / macOS
 cp .env.example .env
-```
-
-ثم املأ القيمتين الإلزاميتين بقيم قوية مولّدة (لا تستخدم قيمًا حقيقية في الكود أبدًا):
-
-```powershell
-# توليد SECRET_KEY و POSTGRES_PASSWORD (نفس الأمر يعمل على الجميع)
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-# أو: openssl rand -base64 48
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 | المتغير | إلزامي؟ | الوصف |
 |---|---|---|
-| `SECRET_KEY` | ✅ | توقيع التوكنات. في `ENVIRONMENT=production` يرفض التطبيق الإقلاع إذا كان ناقصًا أو أقصر من 32 حرفًا |
-| `POSTGRES_PASSWORD` | ✅ | كلمة مرور قاعدة البيانات في خدمة `db` |
-| `ENVIRONMENT` | — | `development` (افتراضي) أو `production` |
+| `SECRET_KEY` | ✅ | توقيع JWT. في `ENVIRONMENT=production` يرفض التطبيق الإقلاع إن كان ناقصًا أو أقصر من 32 حرفًا أو مساويًا لمفتاح التطوير |
+| `POSTGRES_PASSWORD` | ✅ | قاعدة البيانات في خدمة `db` (Compose يفشل برسالة واضحة إن كان فارغًا) |
+| `ENVIRONMENT` | — | `development` (افتراضي) أو `production` — في production يُفرض PostgreSQL ويُمنع SQLite |
 | `POSTGRES_USER` / `POSTGRES_DB` | — | افتراضيًا `root404` |
 | `BACKEND_PORT` / `FRONTEND_PORT` | — | افتراضيًا `8000` / `8080` |
 | `CORS_ORIGINS` | — | الأصول المسموحة مفصولة بفواصل |
+| `DATABASE_URL` / `REDIS_URL` | — | تُحقن تلقائيًا داخل Compose؛ خارج Compose: SQLite + `localhost` (تطوير فقط) |
+| `RATE_LIMIT_*`, `MAX_BODY_BYTES`, `SEED_DEMO_DATA` | — | راجع `.env.example` للقيم الافتراضية |
 
 ### 2) الواجهة الأمامية (Frontend) — Vite + React
 
-> ### ⚠️ ملاحظة Windows PowerShell مهمة
-> بأولوية التنفيذ الافتراضية، PowerShell يمنع سكربت `npm.ps1` («running scripts is disabled on this system»).
-> **لا تُضعف أمن النظام** بتغيير سياسة التنفيذ عالميًا — استخدم `npm.cmd` بدلًا من `npm` داخل PowerShell:
+> ### ⚠️ ملاحظة Windows PowerShell
+> السياسة الافتراضية تمنع `npm.ps1` («running scripts is disabled on this system»).
+> **لا تُضعف أمن النظام** — استخدم `npm.cmd` بدلًا من `npm`:
 
 ```powershell
 # Windows PowerShell
 cd frontend
 npm.cmd ci          # أول مرة فقط (يستخدم package-lock.json)
+npm.cmd run lint    # فحص جودة الكود
+npm.cmd test -- --run   # اختبارات الوحدة (Vitest)
 npm.cmd run build   # بناء الإنتاج إلى dist/
 npm.cmd run dev     # خادم التطوير على http://localhost:5173
 ```
@@ -78,11 +94,10 @@ npm.cmd run dev     # خادم التطوير على http://localhost:5173
 ```bash
 # Linux / macOS
 cd frontend
-npm ci
-npm run build   # أو: npm run dev
+npm ci && npm run lint && npm run test:run && npm run build
 ```
 
-بديل جاهز داخل المشروع على Windows: `.\scripts\build.ps1` (يستدعي `npm.cmd` تلقائيًا).
+بديل جاهز على Windows: `.\scripts\build.ps1` و `.\scripts\start-frontend.ps1`.
 
 ### 3) الـ Backend — FastAPI (بيئة افتراضية)
 
@@ -104,36 +119,38 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-- `requirements.txt` = حزم التشغيل الفعلية المستوردة في `app/` (FastAPI, uvicorn, pydantic-settings, PyJWT).
-- `requirements-dev.txt` = أدوات التطوير والاختبار (pytest, httpx) وتشمل أيضًا حزم التشغيل.
+- `requirements.txt` = حزم التشغيل الفعلية (FastAPI, uvicorn, SQLAlchemy, psycopg2, redis, bcrypt, PyJWT) بدقة Pin.
+- `requirements-dev.txt` = أدوات التطوير والاختبار (pytest, httpx) وتشمل حزم التشغيل.
 
-تشغيل وتحقق:
+تحقق وتشغيل:
 
 ```bash
-# من داخل backend/ مع تنشيط البيئة الافتراضية
 python -m compileall app                      # فحص ترجمة الكود
-python -c "import app.main; print('ok')"      # فحص الاستيراد
-uvicorn app.main:app --reload --port 8000     # تشغيل محلي
+python -c "import app.main; print('backend import passed')"
+uvicorn app.main:app --reload --port 8000     # تشغيل محلي (SQLite للتطوير)
 ```
 
-> في `development` يعمل التطبيق بدون `SECRET_KEY` (مفتاح تطوير غير آمن واضح التسمية داخليًا)؛ في `production` المفتاح القوي **إلزامي**.
+- بدون Redis يعمل التطبيق بوضع `degraded` (الـ health يعيد 200 مع `components.redis: unavailable`).
+- عند الإقلاع يُنشأ المخطط ويُزرع كتالوج المشاريع التجريبي — **idempotent**: إعادة التشغيل لا تكرر البيانات.
+- جداول قاعدة البيانات تُنشأ عبر `create_all` حاليًا؛ قبل أي نشر بإنتاج حقيقي مع بيانات فعلية يلزم إضافة Alembic للهجرات (انظر القيود أدناه).
 
 ### 4) الاختبارات (Tests)
 
 ```powershell
 # Windows PowerShell (بديل جاهز: .\scripts\test.ps1)
 cd backend
-.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m pytest tests -v
 ```
 
 ```bash
-# Linux / macOS — من جذر المشروع أو من backend/
-cd backend && .venv/bin/python -m pytest
-# أو من الجذر مباشرة:
-backend/.venv/bin/python -m pytest backend/tests
+# Linux / macOS — من backend/ أو من جذر المشروع
+cd backend && .venv/bin/python -m pytest tests -v
+backend/.venv/bin/python -m pytest backend/tests -v   # من الجذر
 ```
 
-الاختبارات موجودة في `backend/tests/` (smoke tests للـ health endpoint، توكنات JWT، وسياسات `SECRET_KEY` في production).
+ما تغطيه الاختبارات:
+- **backend (49 اختبار):** health/Redis، التسجيل والدخول، تجزئة كلمات المرور (bcrypt)، انتهاء/تزوير التوكنات، عزل بيانات المستخدمين (لا يمكن قراءة تسليمات غيرك)، كتالوج المشاريع، تدفق التسليمات والتحقق من المدخلات، rate limiting، حد حجم الطلب، رؤوس الأمان، عدم تسريب stack traces، وidempotency الـ seed — كلها على قاعدة بيانات SQLite **معزولة في الذاكرة** لا تمس أي قاعدة حقيقية.
+- **frontend (22 اختبار):** التوجيه و404، المسارات المحمية، خطوتي تسجيل الدخول (OTP)، تحقق نموذج التسجيل، سلوك عميل الـ API (401 يمسح التوكن)، حالات التحميل/الخطأ عبر `useApi`، وتبديل الثيم.
 
 ### 5) التشغيل عبر Docker Compose
 
@@ -141,76 +158,117 @@ backend/.venv/bin/python -m pytest backend/tests
 
 ```bash
 docker compose build          # بناء الصور (backend + frontend)
-docker compose up -d          # تشغيل db + backend + frontend
+docker compose up -d          # تشغيل db + redis + backend + frontend
 docker compose ps             # حالة الخدمات وصحتها
 docker compose logs -f backend
 docker compose down           # إيقاف
 ```
 
-بعد الإقلاع: الواجهة على `http://localhost:8080`، الـ API على `http://localhost:8000/api/health`، توثيق Swagger على `http://localhost:8000/api/docs`.
+بعد الإقلاع: الواجهة على `http://localhost:8080`، الـ API على `http://localhost:8000/api/health`، Swagger على `http://localhost:8000/api/docs`.
 
-للتحقق من صحة ملف الـ Compose بدون تشغيل الحاويات (متغير مؤقت في نفس الجلسة فقط — لا يُحفظ في أي ملف):
-
-```bash
-# Linux/macOS
-SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(48))") \
-POSTGRES_PASSWORD=$(python -c "import secrets; print(secrets.token_urlsafe(32))") \
-docker compose config
-```
+للتحقق من صحة ملف الـ Compose بدون تشغيل الحاويات (متغير مؤقت في نفس الجلسة فقط):
 
 ```powershell
 # Windows PowerShell
-$env:SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(48))"
-$env:POSTGRES_PASSWORD = python -c "import secrets; print(secrets.token_urlsafe(32))"
+$env:SECRET_KEY = "temporary-validation-secret-with-at-least-32-chars"
+$env:POSTGRES_PASSWORD = "temporary-validation-password"
 docker compose config
 Remove-Item Env:SECRET_KEY, Env:POSTGRES_PASSWORD
 ```
 
+```bash
+# Linux/macOS
+SECRET_KEY=temporary-validation-secret-with-at-least-32-chars \
+POSTGRES_PASSWORD=temporary-validation-password \
+docker compose config
+```
+
 ملحوظات أمنية مدمجة في الـ Compose:
-- تمت إزالة حقل `version:` القديم (صيغة Compose v2 الحالية).
-- `SECRET_KEY` و `POSTGRES_PASSWORD` **إلزاميان** (`${VAR:?...}`) — يفشل الأمر برسالة واضحة بدل ترك كلمة مرور فارغة.
-- كل الحاويات تعمل مع `no-new-privileges:true`، والـ backend يعمل بمستخدم غير جذر (`appuser`) مع healthchecks.
+- صيغة Compose v2 (بدون حقل `version:` القديم)؛ `SECRET_KEY` و `POSTGRES_PASSWORD` إلزاميان (`${VAR:?...}`).
+- كل الحاويات مع `no-new-privileges:true` وشبكة معزولة `root404-net`.
+- الـ backend يعمل بمستخدم غير جذر (`appuser`)، والواجهة بصورة `nginx-unprivileged` (غير جذر، منفذ 8080) مع CSP.
+- `db` و `redis` لا تنشران أي منفذ على المضيف — الوصول إليهما داخلي فقط عبر الشبكة الخاصة.
+- Redis بدون تخزين دائم (`--save ""`) لأنه طبقة cache/عداد معدل الطلبات.
 
 ### 6) Makefile (Linux/macOS) — وبديل Windows
 
 ```bash
 make setup          # venv + تثبيت كل الاعتماديات
-make backend-test   # pytest
+make backend-test   # pytest tests -v
 make backend-run    # uvicorn مع reload
 make frontend-build # npm run build
 make docker-up      # docker compose up -d --build
-make clean
 ```
 
-على **Windows PowerShell** استخدم السكربتات المرفقة (لا تتطلب Make):
-
-| الهدف | Linux/macOS (`make ...`) | Windows PowerShell |
+| المهمة | Linux/macOS (`make ...`) | Windows PowerShell |
 |---|---|---|
 | إعداد شامل | `make setup` | `.\scripts\setup.ps1` |
+| تشغيل backend | `make backend-run` | `.\scripts\start-backend.ps1` |
+| تشغيل frontend | `make frontend-dev` | `.\scripts\start-frontend.ps1` |
 | اختبارات backend | `make backend-test` | `.\scripts\test.ps1` |
 | بناء frontend | `make frontend-build` | `.\scripts\build.ps1` |
-| تشغيل كامل | `make docker-up` | `docker compose up -d --build` |
+| تشغيل كامل (Docker) | `make docker-up` | `.\scripts\docker-up.ps1` |
 
 ### 7) هيكل المشروع الفعلي
 
 ```text
 ROOT404/
 ├── backend/
-│   ├── app/                  # main.py, core/ (config, security), api/routes/
-│   ├── tests/                # pytest smoke tests
-│   ├── requirements.txt      # حزم التشغيل
-│   ├── requirements-dev.txt  # + pytest, httpx
-│   └── Dockerfile            # مستخدم غير جذر appuser، healthcheck
+│   ├── app/
+│   │   ├── api/              # routes: auth, projects, health + deps
+│   │   ├── core/             # config, db, security, rate_limit, middleware
+│   │   ├── models/           # User, Project, Submission (SQLAlchemy 2.0)
+│   │   ├── schemas/          # Pydantic v2 request/response models
+│   │   ├── services/         # seed (idempotent) — judge مستقبلًا
+│   │   └── main.py           # lifespan + middleware stack + routers
+│   ├── tests/                # 49 اختبار معزول (SQLite in-memory)
+│   ├── requirements.txt / requirements-dev.txt
+│   └── Dockerfile            # multi-stage، appuser قبل COPY --chown
 ├── frontend/
 │   ├── src/                  # React 18 + Vite + Tailwind + Monaco
-│   ├── Dockerfile            # npm ci كامل في البناء، nginx في الإنتاج
-│   ├── nginx.conf            # SPA fallback + proxy لـ /api
-│   └── package.json
+│   │   ├── components/auth/RequireAuth.jsx
+│   │   ├── hooks/useApi.js
+│   │   └── __tests__/        # 22 اختبار (Vitest + RTL)
+│   ├── Dockerfile            # npm ci كامل في البناء، nginx-unprivileged للإنتاج
+│   ├── nginx.conf            # SPA fallback + /api proxy + CSP
+│   └── eslint.config.js
 ├── scripts/                  # سكربتات PowerShell لويندوز
-├── docker-compose.yml        # db + backend + frontend (Compose v2)
+├── .github/workflows/ci.yml  # CI: lint + tests + build + compose + docker
+├── docker-compose.yml        # db + redis + backend + frontend (Compose v2)
 ├── .env.example              # قالب البيئة (انسخه إلى .env)
 └── Makefile                  # مهام المطوّر على Linux/macOS
 ```
+
+### 8) استكشاف الأخطاء (Troubleshooting)
+
+| المشكلة | السبب | الحل |
+|---|---|---|
+| `npm : ... npm.ps1 cannot be loaded ... running scripts is disabled` | سياسة تنفيذ PowerShell تمنع `npm.ps1` | استخدم `npm.cmd` بدل `npm` (أو سكربتات `scripts\*.ps1`). **لا** تغيّر `Set-ExecutionPolicy` على مستوى النظام |
+| `Cannot connect to the Docker daemon` | Docker Desktop غير شغّال | شغّل Docker Desktop وانتظر حتى يصبح «Running» ثم أعد المحاولة |
+| `SECRET_KEY is not set - copy .env.example...` (Compose) | ملف `.env` غير موجود أو فارغ | اتبع الخطوة 1: انسخ القالب وولّد قيمة قوية |
+| `Refusing to start: ENVIRONMENT=production but SECRET_KEY...` | حماية الإنتاج في الـ backend | ولّد مفتاحًا قويًا (≥32 حرفًا) وحدّث `.env` |
+| `Refusing to start: ... requires a PostgreSQL DATABASE_URL` | SQLite ممنوع في production | استخدم Compose (يحقن `DATABASE_URL` الخاص بـ PostgreSQL) أو حدّد `DATABASE_URL` لـ PostgreSQL |
+| `health` يعيد `{"status":"degraded"}` | Redis غير متاح | تطويريًا: أمر مقبول. عبر Compose: `docker compose ps` وتأكد أن `redis` حاوية سليمة |
+| `connection refused` إلى قاعدة البيانات | `db` لم تنهِ التهيئة بعد | انتظر healthcheck (`docker compose ps`) — الـ backend ينتظر `service_healthy` تلقائيًا |
+| `ModuleNotFoundError: fastapi` بعد التثبيت | البيئة الافتراضية غير مفعّلة أو ناقصة | فعّل `.venv` ثم `python -m pip install -r requirements.txt` وتحقق بـ `python -c "import app.main"` |
+| `pytest: command not found` | ملفات التطوير غير مثبتة | ثبّت `-r requirements-dev.txt` أو استخدم `python -m pytest` |
+
+### 9) القيود الأمنية وتحذيرات الإنتاج (Security limitations)
+
+مُنفّذ ومُختبر:
+- bcrypt (rounds 12) + رفض كلمات المرور > 72 بايت (لا اقتطاع صامت).
+- JWT قصير العمر + رفض التوكنات المزورة/المنتهية/للمستخدمين المحذوفين + 401 موحّد بلا تسريب معلومات.
+- تسجيل الدخول يقاوم account enumeration (رسالة موحّدة + موازنة زمنية).
+- Rate limiting لكل IP على login/register/submissions (429 + `Retry-After`).
+- حد حجم الطلب (413)، رؤوس أمان، منع تسريب stack traces، CORS مقصور على الأصول المحددة.
+- تشفير قوي إلزامي في production + منع SQLite في production + عدم وجود أي أسرار في المستودع.
+
+قيود معروفة (قبل أي نشر إنتاجي حقيقي):
+1. **Rate limiting داخل العملية (in-process):** يعمل مع النشر الأحادي الحالي. عند التوسع الأفقي (عدة workers/نسخ) يجب الانتقال إلى عدّاد مشترك عبر Redis.
+2. **لا migrations بعد:** المخطط يُنشأ عبر `create_all` — مناسب الآن لأن البيانات لم تُنتج بعد؛ Alembic مطلوب قبل أول نشر حقيقي.
+3. **Judge/Sandbox غير موجود:** عند بنائه: بدون شبكة، بدون `seccomp/apparmor: unconfined`، مع `read_only` + حدود موارد + مستخدم غير جذر داخل الحاوية.
+4. **لا HTTPS هنا:** أضف TLS (reverse proxy) قبل أي وصول خارجي.
+5. الواجهة تعتمد بيانات تجريبية (`VITE_USE_MOCK`) لكل ما لم يُنفّذ في الـ backend بعد.
 
 ---
 

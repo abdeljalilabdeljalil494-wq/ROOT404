@@ -22,6 +22,8 @@ npm run dev          # → http://localhost:5173
 Other scripts:
 
 ```bash
+npm run lint         # ESLint (react-hooks + react-refresh rules)
+npm run test:run     # Vitest unit tests (jsdom + Testing Library)
 npm run build        # production bundle into dist/
 npm run preview      # serve dist/ locally to sanity-check the build
 ```

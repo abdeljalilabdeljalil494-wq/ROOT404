@@ -3,6 +3,7 @@ import { Route, Routes, useLocation } from 'react-router-dom'
 
 import PublicLayout from './layouts/PublicLayout'
 import AppLayout from './layouts/AppLayout'
+import RequireAuth from './components/auth/RequireAuth'
 import Home from './pages/Home'
 
 /* Code-split every non-landing route */
@@ -79,8 +80,9 @@ export default function App() {
           <Route path="/workspace" element={<Workspace />} />
           <Route path="/workspace/:slug" element={<Workspace />} />
 
-          {/* Authenticated app */}
-          <Route element={<AppLayout />}>
+          {/* Authenticated app — RequireAuth redirects visitors to /login */}
+          <Route element={<RequireAuth />}>
+            <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:slug" element={<ProjectDetail />} />
@@ -97,6 +99,7 @@ export default function App() {
             <Route path="/mentor" element={<Mentor />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
+            </Route>
           </Route>
 
           <Route path="*" element={<NotFound />} />
