@@ -1,0 +1,27 @@
+# ── Secrets & environment ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+dist/
+*.log
+npm-debug.log*
+# Stray artifact: a package-lock.json without a package.json is generated if
+# `npm install` is ever run at the repo root by accident. Real lockfiles live
+# in frontend/.
+/package-lock.json
+
+# ── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

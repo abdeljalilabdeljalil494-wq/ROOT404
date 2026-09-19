@@ -1,0 +1,9 @@
+# Keep the Docker build context small and free of local state.
+node_modules
+dist
+.env
+.env.local
+.env.*.local
+*.log
+.git
+.vscode

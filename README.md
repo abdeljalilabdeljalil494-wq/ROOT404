@@ -15,8 +15,208 @@
 
 ---
 
+## ⚙️ الإعداد والتشغيل (Setup & Running)
+
+دليل عملي كامل لتشغيل المشروع على **Windows (PowerShell)** و **Linux/macOS**.
+
+### 0) المتطلبات (Prerequisites)
+
+| الأداة | الإصدار | ملاحظات |
+|---|---|---|
+| Node.js + npm | 20+ | للواجهة الأمامية (`node -v`) |
+| Python | 3.11+ | للـ backend (`python --version`) |
+| Docker Desktop | 4.x+ | **يجب أن يكون شغّالاً** قبل أي أمر `docker compose` |
+| Git | أي إصدار حديث | |
+
+> **Docker Desktop على Windows/Linux:** تأكد أنه يعمل (أيقونة الحوت في شريط المهام) قبل تشغيل `docker compose ...`، وإلا ستحصل على خطأ اتصال مثل `Cannot connect to the Docker daemon`.
+
+### 1) إعداد متغيرات البيئة (Environment variables)
+
+ملف `.env` لا يُرفع أبدًا إلى Git (متجاهل في `.gitignore`). أنشئه من القالب:
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+```
+
+```bash
+# Linux / macOS
+cp .env.example .env
+```
+
+ثم املأ القيمتين الإلزاميتين بقيم قوية مولّدة (لا تستخدم قيمًا حقيقية في الكود أبدًا):
+
+```powershell
+# توليد SECRET_KEY و POSTGRES_PASSWORD (نفس الأمر يعمل على الجميع)
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+# أو: openssl rand -base64 48
+```
+
+| المتغير | إلزامي؟ | الوصف |
+|---|---|---|
+| `SECRET_KEY` | ✅ | توقيع التوكنات. في `ENVIRONMENT=production` يرفض التطبيق الإقلاع إذا كان ناقصًا أو أقصر من 32 حرفًا |
+| `POSTGRES_PASSWORD` | ✅ | كلمة مرور قاعدة البيانات في خدمة `db` |
+| `ENVIRONMENT` | — | `development` (افتراضي) أو `production` |
+| `POSTGRES_USER` / `POSTGRES_DB` | — | افتراضيًا `root404` |
+| `BACKEND_PORT` / `FRONTEND_PORT` | — | افتراضيًا `8000` / `8080` |
+| `CORS_ORIGINS` | — | الأصول المسموحة مفصولة بفواصل |
+
+### 2) الواجهة الأمامية (Frontend) — Vite + React
+
+> ### ⚠️ ملاحظة Windows PowerShell مهمة
+> بأولوية التنفيذ الافتراضية، PowerShell يمنع سكربت `npm.ps1` («running scripts is disabled on this system»).
+> **لا تُضعف أمن النظام** بتغيير سياسة التنفيذ عالميًا — استخدم `npm.cmd` بدلًا من `npm` داخل PowerShell:
+
+```powershell
+# Windows PowerShell
+cd frontend
+npm.cmd ci          # أول مرة فقط (يستخدم package-lock.json)
+npm.cmd run build   # بناء الإنتاج إلى dist/
+npm.cmd run dev     # خادم التطوير على http://localhost:5173
+```
+
+```bash
+# Linux / macOS
+cd frontend
+npm ci
+npm run build   # أو: npm run dev
+```
+
+بديل جاهز داخل المشروع على Windows: `.\scripts\build.ps1` (يستدعي `npm.cmd` تلقائيًا).
+
+### 3) الـ Backend — FastAPI (بيئة افتراضية)
+
+```powershell
+# Windows PowerShell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-dev.txt
+```
+
+```bash
+# Linux / macOS
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-dev.txt
+```
+
+- `requirements.txt` = حزم التشغيل الفعلية المستوردة في `app/` (FastAPI, uvicorn, pydantic-settings, PyJWT).
+- `requirements-dev.txt` = أدوات التطوير والاختبار (pytest, httpx) وتشمل أيضًا حزم التشغيل.
+
+تشغيل وتحقق:
+
+```bash
+# من داخل backend/ مع تنشيط البيئة الافتراضية
+python -m compileall app                      # فحص ترجمة الكود
+python -c "import app.main; print('ok')"      # فحص الاستيراد
+uvicorn app.main:app --reload --port 8000     # تشغيل محلي
+```
+
+> في `development` يعمل التطبيق بدون `SECRET_KEY` (مفتاح تطوير غير آمن واضح التسمية داخليًا)؛ في `production` المفتاح القوي **إلزامي**.
+
+### 4) الاختبارات (Tests)
+
+```powershell
+# Windows PowerShell (بديل جاهز: .\scripts\test.ps1)
+cd backend
+.\.venv\Scripts\python.exe -m pytest
+```
+
+```bash
+# Linux / macOS — من جذر المشروع أو من backend/
+cd backend && .venv/bin/python -m pytest
+# أو من الجذر مباشرة:
+backend/.venv/bin/python -m pytest backend/tests
+```
+
+الاختبارات موجودة في `backend/tests/` (smoke tests للـ health endpoint، توكنات JWT، وسياسات `SECRET_KEY` في production).
+
+### 5) التشغيل عبر Docker Compose
+
+يتطلب Docker Desktop شغّالًا وملف `.env` جاهزًا (الخطوة 1):
+
+```bash
+docker compose build          # بناء الصور (backend + frontend)
+docker compose up -d          # تشغيل db + backend + frontend
+docker compose ps             # حالة الخدمات وصحتها
+docker compose logs -f backend
+docker compose down           # إيقاف
+```
+
+بعد الإقلاع: الواجهة على `http://localhost:8080`، الـ API على `http://localhost:8000/api/health`، توثيق Swagger على `http://localhost:8000/api/docs`.
+
+للتحقق من صحة ملف الـ Compose بدون تشغيل الحاويات (متغير مؤقت في نفس الجلسة فقط — لا يُحفظ في أي ملف):
+
+```bash
+# Linux/macOS
+SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(48))") \
+POSTGRES_PASSWORD=$(python -c "import secrets; print(secrets.token_urlsafe(32))") \
+docker compose config
+```
+
+```powershell
+# Windows PowerShell
+$env:SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(48))"
+$env:POSTGRES_PASSWORD = python -c "import secrets; print(secrets.token_urlsafe(32))"
+docker compose config
+Remove-Item Env:SECRET_KEY, Env:POSTGRES_PASSWORD
+```
+
+ملحوظات أمنية مدمجة في الـ Compose:
+- تمت إزالة حقل `version:` القديم (صيغة Compose v2 الحالية).
+- `SECRET_KEY` و `POSTGRES_PASSWORD` **إلزاميان** (`${VAR:?...}`) — يفشل الأمر برسالة واضحة بدل ترك كلمة مرور فارغة.
+- كل الحاويات تعمل مع `no-new-privileges:true`، والـ backend يعمل بمستخدم غير جذر (`appuser`) مع healthchecks.
+
+### 6) Makefile (Linux/macOS) — وبديل Windows
+
+```bash
+make setup          # venv + تثبيت كل الاعتماديات
+make backend-test   # pytest
+make backend-run    # uvicorn مع reload
+make frontend-build # npm run build
+make docker-up      # docker compose up -d --build
+make clean
+```
+
+على **Windows PowerShell** استخدم السكربتات المرفقة (لا تتطلب Make):
+
+| الهدف | Linux/macOS (`make ...`) | Windows PowerShell |
+|---|---|---|
+| إعداد شامل | `make setup` | `.\scripts\setup.ps1` |
+| اختبارات backend | `make backend-test` | `.\scripts\test.ps1` |
+| بناء frontend | `make frontend-build` | `.\scripts\build.ps1` |
+| تشغيل كامل | `make docker-up` | `docker compose up -d --build` |
+
+### 7) هيكل المشروع الفعلي
+
+```text
+ROOT404/
+├── backend/
+│   ├── app/                  # main.py, core/ (config, security), api/routes/
+│   ├── tests/                # pytest smoke tests
+│   ├── requirements.txt      # حزم التشغيل
+│   ├── requirements-dev.txt  # + pytest, httpx
+│   └── Dockerfile            # مستخدم غير جذر appuser، healthcheck
+├── frontend/
+│   ├── src/                  # React 18 + Vite + Tailwind + Monaco
+│   ├── Dockerfile            # npm ci كامل في البناء، nginx في الإنتاج
+│   ├── nginx.conf            # SPA fallback + proxy لـ /api
+│   └── package.json
+├── scripts/                  # سكربتات PowerShell لويندوز
+├── docker-compose.yml        # db + backend + frontend (Compose v2)
+├── .env.example              # قالب البيئة (انسخه إلى .env)
+└── Makefile                  # مهام المطوّر على Linux/macOS
+```
+
+---
+
 ## 📖 جدول المحتويات
 
+- [الإعداد والتشغيل (Setup & Running)](#-الإعداد-والتشغيل-setup--running)
 - [الفكرة العامة](#-الفكرة-العامة-ورؤية-النظام)
 - [ما الذي يميّز École 1337؟](#-ما-الذي-يميّز-école-1337)
 - [نظام التقييم الند-للند (مستوحى من 42)](#-نظام-التقييم-الند-للند-peer-to-peer-evaluation)

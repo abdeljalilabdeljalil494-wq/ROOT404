@@ -13,6 +13,12 @@ npm install
 npm run dev          # → http://localhost:5173
 ```
 
+> **Windows PowerShell:** the default execution policy blocks `npm.ps1`
+> ("running scripts is disabled on this system"). Do **not** loosen the global
+> execution policy — call `npm.cmd` instead: `npm.cmd install`,
+> `npm.cmd run dev`, `npm.cmd run build`. (Or run `..\scripts\setup.ps1` /
+> `..\scripts\build.ps1` from the repo root, which use `npm.cmd` for you.)
+
 Other scripts:
 
 ```bash

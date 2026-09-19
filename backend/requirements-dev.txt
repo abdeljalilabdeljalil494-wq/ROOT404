@@ -1,0 +1,11 @@
+# ROOT 404 — backend development & test dependencies
+# Includes the runtime dependencies plus the test toolchain.
+#
+# Install:  .venv/bin/pip install -r requirements-dev.txt          (Linux/macOS)
+#           .venv\Scripts\python -m pip install -r requirements-dev.txt   (Windows)
+
+-r requirements.txt
+
+# `httpx` is required by starlette's TestClient (fastapi.testclient).
+httpx==0.28.1
+pytest==9.1.1

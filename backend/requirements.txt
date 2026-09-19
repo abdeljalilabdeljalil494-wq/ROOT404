@@ -1,0 +1,16 @@
+# ROOT 404 — backend runtime dependencies
+#
+# Every direct import used by `app/` is listed here with an exact pin so that
+# local installs, CI and the Docker image resolve identically.
+#
+# Install:  python -m venv .venv
+#           .venv/bin/pip install -r requirements.txt          (Linux/macOS)
+#           .venv\Scripts\python -m pip install -r requirements.txt   (Windows)
+#
+# Test/dev tooling lives in requirements-dev.txt.
+
+fastapi==0.141.1
+pydantic==2.13.5
+pydantic-settings==2.15.0
+uvicorn[standard]==0.53.0
+PyJWT==2.14.0

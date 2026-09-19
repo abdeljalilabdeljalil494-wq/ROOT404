@@ -1,0 +1,76 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ROOT 404 — local development / production-like stack (Compose v2 format;
+# the obsolete top-level `version:` key has been removed).
+#
+# REQUIRED SECRETS — never commit your real .env:
+#
+#   Linux/macOS :  cp .env.example .env
+#   PowerShell  :  Copy-Item .env.example .env
+#
+# then generate strong values for SECRET_KEY and POSTGRES_PASSWORD:
+#
+#   python -c "import secrets; print(secrets.token_urlsafe(48))"
+#   # or: openssl rand -base64 48
+#
+# Compose fails fast with a clear message when a required variable is missing
+# (this is intentional — production security is never weakened).
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: root404
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-root404}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - copy .env.example to .env and generate one (see README)}
+      POSTGRES_DB: ${POSTGRES_DB:-root404}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - root404-net
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is not set - copy .env.example to .env and generate one (see README)}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:5173,http://localhost:4173}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - root404-net
+    security_opt:
+      - no-new-privileges:true
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      - backend
+    networks:
+      - root404-net
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:
+
+networks:
+  root404-net:
+    driver: bridge
