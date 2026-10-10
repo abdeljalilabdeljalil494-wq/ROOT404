@@ -1,0 +1,15 @@
+# Netlify configuration for the ROOT 404 frontend.
+# Set "Base directory" to "frontend" when importing the repository in Netlify.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Single-page app: send every route to index.html so React Router works on reload.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
