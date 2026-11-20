@@ -7,7 +7,17 @@ import Button from '../components/ui/Button'
 import Tabs from '../components/ui/Tabs'
 import ProgressBar from '../components/ui/ProgressBar'
 import EmptyState from '../components/ui/EmptyState'
-import { projects, projectStatusMap } from '../data/mock'
+import { useCallback } from 'react'
+import { projectService } from '../services/api'
+import useResource from '../hooks/useResource'
+import ResourceState from '../components/ui/ResourceState'
+const projectStatusMap = {
+  done: { label: 'Terminé', icon: 'CheckCircle2' },
+  progress: { label: 'En cours', icon: 'Loader' },
+  failed: { label: 'Échoué', icon: 'XCircle' },
+  available: { label: 'Disponible', icon: 'Unlock' },
+  locked: { label: 'Verrouillé', icon: 'Lock' },
+}
 
 /* ---------- Status pill ---------- */
 function StatusCell({ p }) {
@@ -156,13 +166,15 @@ function ProjectCard({ p }) {
 export default function Projects() {
   usePageHeader({ title: 'Mes projets', breadcrumb: [{ label: 'Mes projets' }] })
 
+  const resource = useResource(useCallback(() => projectService.list(), []))
+  const projects = (resource.data || []).map(p => ({ ...p, status: p.status === 'passed' ? 'done' : p.status }))
   const [tab, setTab] = useState('all')
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('all')
   const [lang, setLang] = useState('all')
   const [view, setView] = useState('list')
 
-  const langs = useMemo(() => [...new Set(projects.map((p) => p.lang))], [])
+  const langs = useMemo(() => [...new Set(projects.map((p) => p.lang))], [resource.data])
 
   const filtered = useMemo(
     () =>
@@ -177,8 +189,10 @@ export default function Projects() {
           return false
         return true
       }),
-    [tab, q, status, lang],
+    [tab, q, status, lang, resource.data],
   )
+
+  if (resource.loading || resource.error) return <ResourceState resource={resource} />
 
   const count = (s) => projects.filter((p) => p.status === s).length
 
@@ -220,14 +234,14 @@ export default function Projects() {
             />
           </label>
 
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="select w-auto min-w-[130px]">
+          <select aria-label="Filtrer par statut" value={status} onChange={(e) => setStatus(e.target.value)} className="select w-auto min-w-[130px]">
             <option value="all">Statut</option>
             {Object.entries(projectStatusMap).map(([k, v]) => (
               <option key={k} value={k}>{v.label}</option>
             ))}
           </select>
 
-          <select value={lang} onChange={(e) => setLang(e.target.value)} className="select w-auto min-w-[130px]">
+          <select aria-label="Filtrer par langage" value={lang} onChange={(e) => setLang(e.target.value)} className="select w-auto min-w-[130px]">
             <option value="all">Langage</option>
             {langs.map((l) => <option key={l} value={l}>{l}</option>)}
           </select>

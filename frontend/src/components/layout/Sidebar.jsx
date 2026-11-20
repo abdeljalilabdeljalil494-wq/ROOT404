@@ -1,9 +1,10 @@
+import { authService } from '../../services/api'
 import { NavLink } from 'react-router-dom'
 import Logo from '../Logo'
 import Icon from '../ui/Icon'
 import Avatar from '../ui/Avatar'
 import ProgressBar from '../ui/ProgressBar'
-import { currentUser } from '../../data/mock'
+import { useCurrentUser } from '../RequireAuth'
 
 export const SIDEBAR_GROUPS = [
   {
@@ -18,8 +19,8 @@ export const SIDEBAR_GROUPS = [
   {
     title: 'Communauté',
     items: [
-      { label: 'Rooms', to: '/rooms', icon: 'MessagesSquare', badge: '6' },
-      { label: 'Peer Review', to: '/peer-review', icon: 'ClipboardCheck', badge: '2' },
+      { label: 'Rooms', to: '/rooms', icon: 'MessagesSquare', badge: null },
+      { label: 'Peer Review', to: '/peer-review', icon: 'ClipboardCheck', badge: null },
       { label: 'Coalitions', to: '/coalitions', icon: 'Flag' },
       { label: 'Classement', to: '/classement', icon: 'Trophy' },
     ],
@@ -31,6 +32,14 @@ export const SIDEBAR_GROUPS = [
       { label: 'Skill Graph', to: '/skills', icon: 'Network' },
       { label: 'Analytics 360°', to: '/analytics', icon: 'BarChart3' },
       { label: 'ROOT Arena', to: '/arena', icon: 'Swords' },
+      { label: 'Exam Mode', to: '/exam', icon: 'ShieldAlert' },
+    ],
+  },
+  {
+    title: 'Professionnel',
+    items: [
+      { label: 'Emploi & Hiring', to: '/hiring', icon: 'Briefcase' },
+      { label: 'Portfolio', to: '/portfolio', icon: 'Globe' },
     ],
   },
   {
@@ -79,6 +88,7 @@ function Item({ item, onNavigate }) {
 }
 
 export default function Sidebar({ open = false, onClose }) {
+  const currentUser = useCurrentUser()
   return (
     <>
       {/* Mobile scrim */}
@@ -92,7 +102,7 @@ export default function Sidebar({ open = false, onClose }) {
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex w-[258px] flex-col border-r border-line bg-root-950
                     transition-transform duration-300 lg:translate-x-0 ${
-                      open ? 'translate-x-0' : '-translate-x-full'
+                      open ? 'visible translate-x-0' : 'invisible -translate-x-full lg:visible'
                     }`}
       >
         <div className="flex h-[60px] shrink-0 items-center justify-between border-b border-line px-4">
@@ -160,7 +170,8 @@ export default function Sidebar({ open = false, onClose }) {
           </div>
 
           <NavLink
-            to="/"
+            to="/login"
+            onClick={(event) => { event.preventDefault(); authService.logout().catch(() => {}) }}
             className="mt-2 flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-ink-dim transition-colors hover:bg-danger/10 hover:text-danger"
           >
             <Icon name="LogOut" size={17} />

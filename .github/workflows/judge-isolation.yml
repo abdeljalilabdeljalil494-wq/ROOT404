@@ -1,0 +1,61 @@
+name: Judge isolation acceptance (real Docker and gVisor)
+on:
+  workflow_dispatch:
+  push:
+    branches: ['arena/bf97d7c1-root404']
+    paths: ['executor_service/**', 'judge_sandbox/**', 'scripts/*executor*', 'scripts/*gvisor*', 'backend/app/core/judge_protocol.py', '.github/workflows/judge-isolation.yml']
+permissions:
+  contents: read
+concurrency:
+  group: judge-isolation-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements-dev.txt -r executor_service/requirements.txt
+      - name: Install verified release of runsc and require real Docker
+        run: scripts/install_gvisor_ci.sh
+      - name: Build job and obtain immutable repository digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .cache/judge-results
+          docker run -d --name rc-registry -p 127.0.0.1:5000:5000 registry:2
+          docker build --pull -f judge_sandbox/Dockerfile.runner -t localhost:5000/root404-job:rc judge_sandbox
+          docker push localhost:5000/root404-job:rc
+          echo "EXECUTOR_IMAGE=$(docker image inspect localhost:5000/root404-job:rc --format '{{index .RepoDigests 0}}')" >> "$GITHUB_ENV"
+          docker image inspect localhost:5000/root404-job:rc --format '{{.Id}} {{json .RepoDigests}}' > .cache/judge-results/image.txt
+      - name: Exercise HTTPS dispatcher and hostile isolated jobs
+        run: python scripts/run_executor_ci.py
+      - name: Preserve non-secret policy and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: judge-isolation-${{ github.sha }}
+          path: .cache/judge-results/
+          retention-days: 7
+      - name: Final orphan assertion (even when tests fail)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          remaining=$(docker ps -aq --filter label=io.root404.executor=job)
+          volumes=$(docker volume ls -q --filter label=io.root404.executor=job)
+          failed=0
+          if [ -n "$remaining" ]; then
+            docker rm -fv $remaining
+            echo 'FAIL: orphaned jobs required CI cleanup'
+            failed=1
+          fi
+          if [ -n "$volumes" ]; then
+            docker volume rm -f $volumes
+            echo 'FAIL: orphaned volumes required CI cleanup'
+            failed=1
+          fi
+          exit "$failed"

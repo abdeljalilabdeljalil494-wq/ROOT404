@@ -1,19 +1,16 @@
+import { authService } from '../../services/api'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import Icon from '../ui/Icon'
 import Avatar from '../ui/Avatar'
 import ThemeToggle from '../ui/ThemeToggle'
-import { currentUser } from '../../data/mock'
+import { useCurrentUser } from '../RequireAuth'
 
-const NOTIFS = [
-  { icon: 'ClipboardCheck', tone: 'text-brand-500', text: 'nour_dev a réservé un slot de correction pour minishell.', time: '2 min' },
-  { icon: 'Trophy', tone: 'text-warn', text: 'Ta coalition The Phoenix est passée 2ᵉ au classement hebdo.', time: '1 h' },
-  { icon: 'CheckCircle2', tone: 'text-ok', text: 'Moulinette réussie sur get_next_line — 100/100.', time: '2 h' },
-  { icon: 'AlertTriangle', tone: 'text-danger', text: 'philosophers : Moulinette échouée, nouvelle tentative dans 2 j.', time: '4 j' },
-]
+import NotificationMenu from './NotificationMenu'
+import GlobalSearch from './GlobalSearch'
 
 export default function AppTopbar({ title, breadcrumb = [], onMenu, actions }) {
-  const [notifOpen, setNotifOpen] = useState(false)
+  const currentUser = useCurrentUser()
   const [menuOpen, setMenuOpen] = useState(false)
 
   return (
@@ -41,61 +38,22 @@ export default function AppTopbar({ title, breadcrumb = [], onMenu, actions }) {
             ))}
           </nav>
         ) : (
-          <h1 className="truncate text-[15px] font-semibold text-ink">{title}</h1>
+          <p className="truncate text-[15px] font-semibold text-ink">{title}</p>
         )}
       </div>
 
-      {/* Search */}
-      <label className="relative hidden h-9 w-56 items-center md:flex xl:w-80">
-        <Icon name="Search" size={15} className="pointer-events-none absolute left-3 text-ink-faint" />
-        <input
-          placeholder="Rechercher…"
-          className="h-full w-full rounded-lg border border-line bg-root-850 pl-9 pr-3 text-[13px] text-ink placeholder:text-ink-faint focus:border-brand-500/50 focus:outline-none"
-        />
-      </label>
+      <GlobalSearch />
 
       {actions}
 
       <div className="flex items-center gap-0.5">
         <ThemeToggle />
 
-        <div className="relative">
-          <button
-            onClick={() => { setNotifOpen((o) => !o); setMenuOpen(false) }}
-            aria-label="Notifications"
-            className="relative grid h-9 w-9 place-items-center rounded-lg text-ink-soft transition-colors hover:bg-white/[0.06] hover:text-ink"
-          >
-            <Icon name="Bell" size={17} />
-            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-root-950" />
-          </button>
-
-          {notifOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
-              <div className="absolute right-0 z-50 mt-2 w-[330px] overflow-hidden rounded-xl border border-line bg-root-800 shadow-pop">
-                <div className="flex items-center justify-between border-b border-line px-4 py-3">
-                  <span className="text-[13px] font-semibold text-ink">Notifications</span>
-                  <button className="text-[11px] font-medium text-brand-500 hover:underline">Tout marquer lu</button>
-                </div>
-                <ul className="max-h-80 overflow-y-auto">
-                  {NOTIFS.map((n, i) => (
-                    <li key={i} className="flex gap-3 border-b border-line/60 px-4 py-3 transition-colors last:border-0 hover:bg-white/[0.03]">
-                      <span className={`mt-0.5 shrink-0 ${n.tone}`}><Icon name={n.icon} size={16} /></span>
-                      <div className="min-w-0">
-                        <p className="text-[12.5px] leading-snug text-ink-soft">{n.text}</p>
-                        <p className="mt-1 text-[11px] text-ink-faint">il y a {n.time}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </>
-          )}
-        </div>
+        <NotificationMenu />
 
         <div className="relative ml-1">
           <button
-            onClick={() => { setMenuOpen((o) => !o); setNotifOpen(false) }}
+            onClick={() => { setMenuOpen((o) => !o) }}
             aria-label="Menu du compte"
             className="rounded-full transition-transform hover:scale-105"
           >
@@ -126,7 +84,8 @@ export default function AppTopbar({ title, breadcrumb = [], onMenu, actions }) {
                 ))}
                 <div className="mt-1 border-t border-line pt-1">
                   <Link
-                    to="/"
+                    to="/login"
+                    onClick={(event) => { event.preventDefault(); authService.logout().catch(() => {}) }}
                     className="flex items-center gap-2.5 px-4 py-2 text-[13px] text-danger transition-colors hover:bg-danger/10"
                   >
                     <Icon name="LogOut" size={15} /> Déconnexion

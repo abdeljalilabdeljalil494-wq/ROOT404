@@ -3,10 +3,10 @@ import Logo, { LogoMark } from '../../components/Logo'
 import Icon from '../../components/ui/Icon'
 
 const POINTS = [
-  { icon: 'Terminal', t: 'Sandbox Ubuntu isolé', d: 'Chaque soumission tourne dans son propre conteneur Docker.' },
-  { icon: 'Users', t: 'Correction par les pairs', d: 'Un vrai humain relit ton code, en visio, avec une checklist.' },
-  { icon: 'Brain', t: 'AI Mentor socratique', d: "Des questions qui font réfléchir, jamais la solution servie." },
-  { icon: 'BadgeCheck', t: 'Portfolio vérifié', d: 'Un profil public que les entreprises peuvent auditer.' },
+  { icon: 'Terminal', t: 'Exécution contrôlée', d: 'Judge désactivé tant que l’isolation n’est pas vérifiée.' },
+  { icon: 'Users', t: 'Correction par les pairs', d: 'Relecture structurée ; la visioconférence n’est pas intégrée.' },
+  { icon: 'Brain', t: 'AI Mentor socratique', d: "Conseils IA si configurée ; vérifie toujours les réponses." },
+  { icon: 'BadgeCheck', t: 'Portfolio vérifié', d: 'Publication facultative, privée par défaut.' },
 ]
 
 /**
@@ -71,18 +71,7 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
             ))}
           </ul>
 
-          <div className="mt-10 flex items-center gap-6 border-t border-line pt-6">
-            {[
-              { v: '12,487+', l: 'Codeurs' },
-              { v: '892+', l: 'Projets' },
-              { v: '42', l: 'Coalitions' },
-            ].map((s) => (
-              <div key={s.l}>
-                <p className="font-mono text-[19px] font-extrabold text-brand-500">{s.v}</p>
-                <p className="text-[11px] text-ink-dim">{s.l}</p>
-              </div>
-            ))}
-          </div>
+          <p className="mt-10 border-t border-line pt-6 text-sm text-ink-soft">Version de développement · fonctionnalités et intégrations en cours de validation.</p>
         </div>
       </div>
     </div>

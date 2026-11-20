@@ -1,0 +1,13 @@
+# No supervisor, credentials, expected answers or result writer in this image.
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ python3 nodejs ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && (getent passwd 1000 >/dev/null || useradd -m -s /bin/false -u 1000 judge) \
+    && mkdir -p /workspace /opt/judge \
+    && chown 1000:1000 /workspace
+COPY launch.py /opt/judge/launch.py
+RUN chown -R root:root /opt/judge && chmod -R go-w /opt/judge
+USER 1000:1000
+WORKDIR /workspace
+ENTRYPOINT ["/usr/bin/python3", "-I", "/opt/judge/launch.py", "run"]

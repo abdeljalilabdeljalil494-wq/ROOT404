@@ -23,6 +23,7 @@ export default function ProgressBar({
         className={`w-full overflow-hidden rounded-full ${trackClass}`}
         style={{ height }}
         role="progressbar"
+        aria-label={label || "Progression"}
         aria-valuenow={v}
         aria-valuemin={0}
         aria-valuemax={100}

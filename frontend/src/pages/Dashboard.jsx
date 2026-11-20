@@ -7,15 +7,9 @@ import Avatar from '../components/ui/Avatar'
 import StatCard from '../components/ui/StatCard'
 import ProgressBar from '../components/ui/ProgressBar'
 import BarChart from '../components/ui/BarChart'
-import {
-  currentUser,
-  dashboardStats,
-  recentActivity,
-  weeklyActivity,
-  dailyMission,
-  upcomingSlots,
-  projects,
-} from '../data/mock'
+import { useEffect, useState } from 'react'
+import { dashboardService, projectService } from '../services/api'
+
 
 const TONE_TEXT = { ok: 'text-ok', danger: 'text-danger', brand: 'text-brand-500', muted: 'text-ink-dim' }
 const TONE_DOT = { ok: 'bg-ok', danger: 'bg-danger', brand: 'bg-brand-500', muted: 'bg-ink-faint' }
@@ -38,6 +32,22 @@ function Panel({ title, action, children, className = '', icon }) {
 export default function Dashboard() {
   usePageHeader({ title: 'Tableau de bord' })
 
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let active = true
+    Promise.all([dashboardService.overview(), projectService.list()]).then(([overview, projects]) => {
+      if (active) setData({ ...overview, projects })
+    }).catch(() => { if (active) setError(true) })
+    return () => { active = false }
+  }, [attempt])
+  if (error) return <div role="alert" className="p-8">Données indisponibles. <button onClick={() => { setError(false); setAttempt(n => n + 1) }}>Réessayer</button></div>
+  if (!data) return <p role="status" className="p-8">Chargement du tableau de bord…</p>
+  const { user, stats: dashboardStats, recentActivity, weeklyActivity, dailyMission, projects } = data
+  const currentUser = { ...user, levelProgress: data.levelProgress }
+  const upcomingSlots = [] // No fabricated appointments; manage bookings in Peer Review.
+  const nextLevel = Math.floor(user.level) + 1
   const inProgress = projects.filter((p) => p.status === 'progress' || p.status === 'available').slice(0, 3)
 
   return (
@@ -54,10 +64,10 @@ export default function Dashboard() {
           <p className="mt-1 text-[13px] text-ink-dim">
             Continue là où tu t'es arrêté — il te reste{' '}
             <span className="font-semibold text-brand-500">{currentUser.xpToNext.toLocaleString('fr-FR')} XP</span>{' '}
-            avant le niveau 7.00.
+            avant le niveau {nextLevel}.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button to="/workspace/minishell" size="sm" icon="Play">Reprendre minishell</Button>
+            <Button to="/projects" size="sm" icon="Play">Choisir un projet</Button>
             <Button to="/projects" size="sm" variant="outline" icon="FolderKanban">Mes projets</Button>
             <Button to="/mentor" size="sm" variant="ghost" icon="Sparkles">Assistant IA</Button>
           </div>
@@ -84,7 +94,7 @@ export default function Dashboard() {
             </div>
             <ProgressBar value={currentUser.levelProgress} height={8} className="mt-4" />
             <div className="mt-2.5 flex items-center justify-between text-[11.5px]">
-              <span className="text-ink-dim">Prochain niveau : 7.00</span>
+              <span className="text-ink-dim">Prochain niveau : {nextLevel}</span>
               <span className="font-semibold text-brand-500">{currentUser.levelProgress}%</span>
             </div>
           </div>
@@ -110,6 +120,7 @@ export default function Dashboard() {
           }
         >
           <ul className="divide-y divide-line/70">
+            {recentActivity.length === 0 && <li className="p-5 text-ink-dim">Aucune soumission enregistrée.</li>}
             {recentActivity.map((a) => (
               <li
                 key={a.id}
@@ -142,12 +153,11 @@ export default function Dashboard() {
         </Panel>
 
         <div className="space-y-5">
-          <Panel title="Activité hebdomadaire" icon="BarChart3" action={<Badge tone="ok">+18%</Badge>}>
+          <Panel title="Activité hebdomadaire" icon="BarChart3" >
             <div className="p-5">
               <BarChart data={weeklyActivity} height={140} />
               <p className="mt-4 border-t border-line pt-3 text-[11.5px] text-ink-dim">
-                <span className="font-semibold text-ink">17 h 24 min</span> de code cette semaine —
-                meilleur jour : mercredi.
+                Nombre de soumissions enregistrées par jour (UTC).
               </p>
             </div>
           </Panel>
@@ -165,7 +175,7 @@ export default function Dashboard() {
               <p className="font-mono text-[14px] font-semibold text-ink">{dailyMission.title}</p>
               <p className="mt-1 text-[11.5px] text-ink-dim">{dailyMission.skill}</p>
               <div className="mt-4 flex items-center justify-between">
-                <div className="flex items-center gap-1" aria-label={`Difficulté ${dailyMission.difficulty}/5`}>
+                <div role="img" className="flex items-center gap-1" aria-label={`Difficulté ${dailyMission.difficulty}/5`}>
                   {Array.from({ length: 5 }).map((_, i) => (
                     <Icon
                       key={i}
@@ -179,7 +189,8 @@ export default function Dashboard() {
                   <Icon name="Clock" size={12} /> {dailyMission.time}
                 </span>
               </div>
-              <Button size="sm" full className="mt-4" iconRight="ArrowRight">Lancer la mission</Button>
+              <Link to="/progress" className="text-brand-400">Missions, badges et récompenses</Link>
+              <p className="mt-4 text-xs text-ink-dim">Mission Stream Sum évaluée par le juge ; aucune récompense sans réussite enregistrée.</p>
             </div>
           </section>
         </div>
@@ -233,6 +244,7 @@ export default function Dashboard() {
           action={<Link to="/peer-review" className="text-[12px] font-medium text-brand-500 hover:underline">Gérer</Link>}
         >
           <ul className="divide-y divide-line/70">
+            {upcomingSlots.length === 0 && <li className="p-5 text-ink-dim">Consulte les réservations dans Peer Review.</li>}
             {upcomingSlots.map((s) => (
               <li key={s.id} className="flex items-center gap-3 px-5 py-4">
                 <Avatar name={s.peer} size="sm" status="online" />
@@ -248,7 +260,7 @@ export default function Dashboard() {
             ))}
           </ul>
           <div className="border-t border-line p-5">
-            <Button variant="outline" size="sm" full icon="Plus">Réserver un slot</Button>
+            <Button to="/peer-review" variant="outline" size="sm" full icon="Plus">Gérer les corrections</Button>
           </div>
         </Panel>
       </div>

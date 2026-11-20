@@ -11,9 +11,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     strictPort: true,
-    // Allow the sandbox preview host (and any host) to reach the dev server
     allowedHosts: true,
-    // Proxy the FastAPI backend during local development
     proxy: {
       '/api': {
         target: process.env.VITE_API_TARGET || 'http://localhost:8000',
@@ -30,12 +28,24 @@ export default defineConfig({
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          monaco: ['@monaco-editor/react'],
-          icons: ['lucide-react'],
+        manualChunks(id) {
+          if (id.includes('node_modules/lucide-react/')) return 'icons'
+          if (id.includes('node_modules/@monaco-editor/')) return 'monaco'
+          if (/node_modules\/(react|react-dom|react-router)(\/|-)/.test(id)) return 'react'
         },
       },
     },
+  },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.js'],
+    include: ['src/**/*.{test,spec}.{js,jsx}'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: ['node_modules/', 'src/test/', 'dist/'],
+    },
+    testTimeout: 10000,
   },
 })

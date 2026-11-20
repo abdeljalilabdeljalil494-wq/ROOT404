@@ -1,0 +1,32 @@
+[Unit]
+Description=ROOT404 trusted isolated-job dispatcher
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root404-executor
+Group=root404-executor
+SupplementaryGroups=docker
+WorkingDirectory=/opt/root404
+EnvironmentFile=/etc/root404/executor.env
+RuntimeDirectory=root404-executor
+RuntimeDirectoryMode=0700
+StateDirectory=root404-executor
+StateDirectoryMode=0700
+ExecStart=/opt/root404/.venv/bin/uvicorn executor_service.service:create_app --factory --host 127.0.0.1 --port 8090 --workers 1 --no-access-log
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/root404-executor /var/lib/root404-executor
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+LimitNOFILE=1024
+TasksMax=128
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
