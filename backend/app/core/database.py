@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import StaticPool, QueuePool
 from sqlalchemy.exc import SQLAlchemyError
@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 connect_args = {}
 engine_kwargs = {
     "echo": False,
+    "hide_parameters": True,
     "pool_pre_ping": True,  # Verify connections before use
 }
 
@@ -83,7 +84,19 @@ def init_db():
         from app.models import DailyMission, Badge, UserBadge, AuditLog, ArenaMatch, PiscineDay, UserPiscineProgress  # noqa
         
         logger.info(f"Initializing database: {get_safe_database_url()}")
-        Base.metadata.create_all(bind=engine)
+        from app.models import auth_state, mentor  # noqa
+        if settings.ENVIRONMENT == "production":
+            from alembic.config import Config
+            from alembic.script import ScriptDirectory
+            from alembic.runtime.migration import MigrationContext
+            from pathlib import Path
+            cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+            cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
+            with engine.connect() as connection:
+                if MigrationContext.configure(connection).get_current_revision() != ScriptDirectory.from_config(cfg).get_current_head():
+                    raise RuntimeError("Database migrations required: alembic upgrade head")
+        else:
+            Base.metadata.create_all(bind=engine)
         logger.info("Database tables created/verified successfully")
     except SQLAlchemyError as e:
         logger.error(f"Failed to initialize database: {e}", exc_info=True)
@@ -96,7 +109,7 @@ def check_db_health() -> bool:
     """Check database connectivity"""
     try:
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         return True
     except Exception as e:
         logger.error(f"Database health check failed: {e}")

@@ -91,9 +91,10 @@ def test_judge_moulinette():
         },
         headers={"Authorization": f"Bearer {token}"}
     )
-    assert resp.status_code == 200
-    assert "score" in resp.json()
-    assert "tests" in resp.json()
+    # No executable project suite or isolated service is configured in this test.
+    # A fabricated success would award invalid progress.
+    assert resp.status_code == 503
+    assert "score" not in resp.json()
 
 def test_ai_ask():
     token = get_token_for_demo()
@@ -101,8 +102,8 @@ def test_ai_ask():
         json={"message": "Why segfault?", "level": 2},
         headers={"Authorization": f"Bearer {token}"}
     )
-    assert resp.status_code == 200
-    assert "text" in resp.json() or "role" in resp.json()
+    # Provider credentials are intentionally absent; no canned mentorship response.
+    assert resp.status_code == 503
 
 def test_leaderboard():
     _clear_rate_limiter()
@@ -130,12 +131,13 @@ def test_portfolio():
 def test_hiring():
     _clear_rate_limiter()
     resp = client.get("/api/hiring/companies")
-    assert resp.status_code == 200
+    # Corporate catalog/application persistence is not implemented.
+    assert resp.status_code == 503
 
 def test_exam():
     token = get_token_for_demo()
     resp = client.get("/api/exam/tracks", headers={"Authorization": f"Bearer {token}"})
-    assert resp.status_code == 200
+    assert resp.status_code == 503
 
 def teardown_module():
     _clear_stores()

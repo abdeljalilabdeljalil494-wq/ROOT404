@@ -54,6 +54,11 @@ class User(Base):
     blackhole_warning = Column(Boolean, default=False, nullable=False)
     last_activity = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     
+    # Private by default; public directories require explicit opt-in.
+    public_profile = Column(Boolean, default=False, nullable=False, server_default="0")
+    directory_visible = Column(Boolean, default=False, nullable=False, server_default="0")
+    session_version = Column(Integer, default=0, nullable=False, server_default="0")
+
     # Status
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_admin = Column(Boolean, default=False, nullable=False)
@@ -78,16 +83,18 @@ class User(Base):
     corrections_received = relationship("Correction", foreign_keys="Correction.author_id", back_populates="author", cascade="all, delete-orphan", passive_deletes=True)
 
     def to_dict(self):
+        from app.services.gamification import calculate_level_progress, xp_to_level, LEVEL_THRESHOLDS
         return {
             "id": self.id,
             "username": self.username,
             "displayName": self.display_name,
             "fullName": self.full_name,
             "email": self.email,
-            "avatar": self.avatar_url or f"https://i.pravatar.cc/160?u={self.username}",
+            "avatar": self.avatar_url,
             "level": self.level,
+            "levelProgress": calculate_level_progress(self.xp),
             "xp": self.xp,
-            "xpToNext": self.xp_to_next,
+            "xpToNext": max(0, LEVEL_THRESHOLDS[min(21, int(xp_to_level(self.xp)) + 1)] - self.xp),
             "projectsDone": self.projects_done,
             "correctionPoints": self.correction_points,
             "accountValue": self.account_value,

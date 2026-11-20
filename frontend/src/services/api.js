@@ -30,7 +30,8 @@ function validateFileName(filename) {
   if (filename.length > 100) {
     throw new Error('Filename too long')
   }
-  if (filename.includes('..') || filename.startsWith('/') || filename.includes('\\') || filename.includes('\x00')) {
+  if (!/^[A-Za-z0-9_][A-Za-z0-9_./-]{0,99}$/.test(filename) ||
+      filename.split('/').some(part => !part || part === '.' || part === '..' || part.startsWith('.'))) {
     throw new Error('Invalid filename: path traversal detected')
   }
   return true
@@ -109,9 +110,6 @@ http.interceptors.request.use((config) => {
     if (config.data.message) {
       config.data.message = sanitizeInput(config.data.message, 5000)
     }
-    if (config.data.code) {
-      config.data.code = sanitizeInput(config.data.code, 100000)
-    }
   }
   
   // Add request ID for tracing
@@ -178,10 +176,10 @@ http.interceptors.response.use(
 )
 
 /**
- * While the backend is not wired up, every endpoint resolves from `data/mock.js`.
- * Flip VITE_USE_MOCK=false once FastAPI is running to hit the real API.
+ * Demo fixtures require explicit development opt-in. Real requests are the default;
+ * failures are propagated and production builds cannot enable this switch.
  */
-const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
+export const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_USE_MOCK === 'true'
 
 const delay = (ms = 220) => new Promise((r) => setTimeout(r, ms))
 
@@ -190,23 +188,13 @@ async function resolve(mockValue, request) {
     await delay()
     return mockValue
   }
-  try {
-    const { data } = await request()
-    return data
-  } catch (e) {
-    // Fallback to mock on network error in dev
-    if (import.meta.env.DEV) {
-      console.warn('[API] Falling back to mock due to error:', e.message)
-      await delay()
-      return mockValue
-    }
-    throw e
-  }
+  const { data } = await request()
+  return data
 }
 
 /* ---------------------------------- Auth --------------------------------- */
 export const authService = {
-  me: () => resolve(mock.currentUser, () => http.get('/auth/me/full').then(r => r.data).catch(() => http.get('/auth/me').then(r => r.data))),
+  me: () => resolve(mock.currentUser, () => http.get('/auth/me/full')),
   meSimple: () => resolve(mock.currentUser, () => http.get('/auth/me')),
   requestOtp: (email) => {
     email = sanitizeInput(email, 254)
@@ -244,10 +232,14 @@ export const authService = {
     }
     return resolve({ user: mock.currentUser, dev_otp: '123456' }, () => http.post('/auth/register', payload))
   },
-  logout: () => {
-    localStorage.removeItem('root404_token')
-    localStorage.removeItem('root404_user')
-    return Promise.resolve(true)
+  logout: async () => {
+    try {
+      if (!USE_MOCK) await http.post('/auth/logout')
+    } finally {
+      localStorage.removeItem('root404_token')
+      localStorage.removeItem('root404_user')
+      window.dispatchEvent(new CustomEvent('auth:logout'))
+    }
   },
 }
 
@@ -276,7 +268,7 @@ export const projectService = {
     slug = sanitizeInput(slug, 100)
     validateFiles(files)
     language = validateLanguage(language)
-    return resolve({ ok: true, score: 92 }, () => http.post(`/projects/${slug}/submit`, { files, language }))
+    return resolve({ ok: true, score: 92 }, () => http.post(`/projects/${slug}/submit`, { files, language }, { timeout: 180000 }))
   },
   submissions: (slug) => {
     slug = sanitizeInput(slug, 100)
@@ -383,7 +375,7 @@ export const judgeService = {
     if (payload.language) {
       validateLanguage(payload.language)
     }
-    return resolve({ lines: mock.terminalLines }, () => http.post('/judge/run', payload))
+    return resolve({ lines: mock.terminalLines }, () => http.post('/judge/run', payload, { timeout: 100000 }))
   },
   moulinette: (slug, files, language = 'c') => {
     slug = sanitizeInput(slug, 100)
@@ -420,14 +412,14 @@ export const aiService = {
         role: 'ai',
         text: "Bonne question. Avant de te répondre, reformule-moi le problème avec tes propres mots — qu'attends-tu exactement en sortie ?",
       },
-      () => http.post('/ai/ask', payload),
+      () => http.post('/ai/ask', payload, { timeout: 45000 }),
     )
   },
-  review: (code) => {
+  review: (code, language = 'c', project_slug = null) => {
     if (!code || code.length > 100000) {
       throw new Error('Invalid code')
     }
-    return resolve(mock.aiCodeReview, () => http.post('/ai/review', { code }))
+    return resolve(mock.aiCodeReview, () => http.post('/ai/review', { code, language, project_slug }, { timeout: 45000 }))
   },
   levels: () => resolve(mock.aiLevels || [], () => http.get('/ai/levels')),
   gaps: () => resolve({ gaps: [], challenges: [] }, () => http.get('/ai/gaps')),
@@ -584,4 +576,22 @@ export default {
   mentorshipService,
   http,
   SECURITY, // Export for testing
+}
+
+
+// Privacy and destructive actions never use demo resolve/fake acknowledgements.
+export const accountService = {
+  privacy: () => http.get('/account/privacy').then(response => response.data),
+  savePrivacy: (preferences) => http.put('/account/privacy', preferences).then(response => response.data),
+  saveProfile: (profile) => http.put('/account/profile', profile).then(response => response.data),
+  exportData: () => http.get('/account/export').then(response => response.data),
+  revokeAll: () => http.post('/account/sessions/revoke-all').then(response => response.data),
+  deleteAccount: (confirmation) => http.delete('/account', { data: { confirmation } }).then(response => response.data),
+}
+
+
+export const notificationService = {
+  list: () => http.get('/notifications').then(response => response.data),
+  read: (id) => http.post(`/notifications/${encodeURIComponent(id)}/read`).then(response => response.data),
+  readAll: () => http.post('/notifications/read-all').then(response => response.data),
 }

@@ -1,6 +1,8 @@
 import { Suspense, lazy, useEffect } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 
+import PrototypeFeature from './components/PrototypeFeature'
+import RequireAuth from './components/RequireAuth'
 import PublicLayout from './layouts/PublicLayout'
 import AppLayout from './layouts/AppLayout'
 import Home from './pages/Home'
@@ -11,26 +13,27 @@ const About = lazy(() => import('./pages/About'))
 const Parcours = lazy(() => import('./pages/Parcours'))
 const Blog = lazy(() => import('./pages/Blog'))
 const Community = lazy(() => import('./pages/Community'))
+const OAuthCallback = lazy(() => import('./pages/auth/OAuthCallback'))
 const Login = lazy(() => import('./pages/auth/Login'))
 const Register = lazy(() => import('./pages/auth/Register'))
 
+const BetaProgress = lazy(() => import('./pages/BetaProgress'))
+const Moderation = lazy(() => import('./pages/Moderation'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Projects = lazy(() => import('./pages/Projects'))
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'))
 const Workspace = lazy(() => import('./pages/Workspace'))
 const Rooms = lazy(() => import('./pages/Rooms'))
 const RoomView = lazy(() => import('./pages/RoomView'))
-const PeerReview = lazy(() => import('./pages/PeerReview'))
-const Leaderboard = lazy(() => import('./pages/Leaderboard'))
-const Coalitions = lazy(() => import('./pages/Coalitions'))
+const PeerReview = lazy(() => import('./pages/PeerReviewLive'))
+const Leaderboard = lazy(() => import('./pages/LeaderboardLive'))
+const Coalitions = lazy(() => import('./pages/CoalitionsLive'))
 const Piscine = lazy(() => import('./pages/Piscine'))
-const Journey = lazy(() => import('./pages/Journey'))
-const SkillGraph = lazy(() => import('./pages/SkillGraph'))
-const Analytics = lazy(() => import('./pages/Analytics'))
+const LearningInsights = lazy(() => import('./pages/LearningInsights'))
 const Arena = lazy(() => import('./pages/Arena'))
 const Mentor = lazy(() => import('./pages/Mentor'))
-const Profile = lazy(() => import('./pages/Profile'))
-const Portfolio = lazy(() => import('./pages/Portfolio'))
+const Profile = lazy(() => import('./pages/ProfileLive'))
+const Portfolio = lazy(() => import('./pages/PortfolioLive'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Hiring = lazy(() => import('./pages/Hiring'))
 const Exam = lazy(() => import('./pages/Exam'))
@@ -70,10 +73,11 @@ export default function App() {
             <Route path="/about" element={<About />} />
             <Route path="/parcours" element={<Parcours />} />
             <Route path="/blog" element={<Blog />} />
-            <Route path="/communaute" element={<Community />} />
+            <Route path="/communaute" element={<PrototypeFeature><Community /></PrototypeFeature>} />
           </Route>
 
           {/* Auth (no chrome) */}
+          <Route path="/oauth/callback/:provider" element={<OAuthCallback />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
 
@@ -81,6 +85,7 @@ export default function App() {
           <Route path="/u/:username" element={<Portfolio />} />
           <Route path="/portfolio" element={<Portfolio />} />
 
+          <Route element={<RequireAuth />}>
           {/* Full-bleed IDE (own chrome) */}
           <Route path="/workspace" element={<Workspace />} />
           <Route path="/workspace/:slug" element={<Workspace />} />
@@ -96,6 +101,8 @@ export default function App() {
               </ErrorBoundary>
             }
           >
+            <Route path="/progress" element={<BetaProgress />} />
+            <Route path="/moderation" element={<Moderation />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:slug" element={<ProjectDetail />} />
@@ -104,18 +111,19 @@ export default function App() {
             <Route path="/peer-review" element={<PeerReview />} />
             <Route path="/classement" element={<Leaderboard />} />
             <Route path="/coalitions" element={<Coalitions />} />
-            <Route path="/piscine" element={<Piscine />} />
-            <Route path="/journey" element={<Journey />} />
-            <Route path="/skills" element={<SkillGraph />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/arena" element={<Arena />} />
+            <Route path="/piscine" element={<PrototypeFeature><Piscine /></PrototypeFeature>} />
+            <Route path="/journey" element={<LearningInsights mode="journey" />} />
+            <Route path="/skills" element={<LearningInsights mode="skills" />} />
+            <Route path="/analytics" element={<LearningInsights mode="analytics" />} />
+            <Route path="/arena" element={<PrototypeFeature><Arena /></PrototypeFeature>} />
             <Route path="/mentor" element={<Mentor />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/hiring" element={<Hiring />} />
-            <Route path="/exam" element={<Exam />} />
+            <Route path="/hiring" element={<PrototypeFeature><Hiring /></PrototypeFeature>} />
+            <Route path="/exam" element={<PrototypeFeature><Exam /></PrototypeFeature>} />
           </Route>
 
+          </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

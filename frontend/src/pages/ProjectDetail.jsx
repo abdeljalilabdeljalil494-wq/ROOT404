@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import usePageHeader from '../hooks/usePageHeader'
 import Icon from '../components/ui/Icon'
@@ -8,46 +8,29 @@ import Tabs from '../components/ui/Tabs'
 import Avatar from '../components/ui/Avatar'
 import ProgressBar from '../components/ui/ProgressBar'
 import EmptyState from '../components/ui/EmptyState'
-import { projects, moulinetteTests, currentUser } from '../data/mock'
-
-const OBJECTIVES = [
-  'Afficher un prompt et lire une ligne avec la bibliothèque readline.',
-  'Gérer un historique de commandes fonctionnel.',
-  'Chercher et lancer le bon exécutable (PATH, chemin relatif, chemin absolu).',
-  'Implémenter les builtins : echo -n, cd, pwd, export, unset, env, exit.',
-  'Gérer les redirections <, >, <<, >> et les pipes |.',
-  'Gérer les variables d’environnement et $? .',
-  'Gérer ctrl-C, ctrl-D et ctrl-\\ comme dans bash.',
-]
-
-const CONSTRAINTS = [
-  { icon: 'Ban', text: 'Aucune fuite mémoire tolérée (hors readline).' },
-  { icon: 'Ruler', text: 'Norminette : 25 lignes max par fonction, 5 fonctions par fichier.' },
-  { icon: 'FileCode', text: 'Un Makefile avec les règles all, clean, fclean, re, bonus.' },
-  { icon: 'Users', text: 'Projet en binôme — les deux membres doivent défendre le code.' },
-  { icon: 'ShieldAlert', text: 'Une seule variable globale autorisée, pour le numéro de signal reçu.' },
-]
-
-const DISCUSSIONS = [
-  { user: 'mehdi42', avatar: 'https://i.pravatar.cc/64?img=33', time: 'il y a 3 h', text: 'Petit rappel : `waitpid` dans une boucle sur tous les enfants, sinon vos zombies vous hanteront à la correction.', votes: 24 },
-  { user: 'ines_dev', avatar: 'https://i.pravatar.cc/64?img=47', time: 'il y a 1 j', text: 'Quelqu’un a réussi à gérer le heredoc avec expansion des variables ? Je bloque sur le cas `<< "EOF"`.', votes: 11 },
-  { user: 'chaimacoder', avatar: 'https://i.pravatar.cc/64?img=45', time: 'il y a 2 j', text: 'Astuce : testez avec `cat | cat | ls`, c’est le cas qui casse 80 % des minishells.', votes: 47 },
-]
-
-const CORRECTIONS = [
-  { peer: 'nour_dev', avatar: 'https://i.pravatar.cc/64?img=32', date: '28 août 2026', score: 92, comment: 'Parsing solide, gestion des quotes impeccable. Quelques leaks sur les heredocs imbriqués.' },
-  { peer: 'skhalifa', avatar: 'https://i.pravatar.cc/64?img=26', date: '26 août 2026', score: 78, comment: 'Bonne architecture mais `exec.c` fait 400 lignes — à découper avant la prochaine soutenance.' },
-]
+import { projectService } from '../services/api'
+import { useCurrentUser } from '../components/RequireAuth'
+import useResource from '../hooks/useResource'
+import ResourceState from '../components/ui/ResourceState'
 
 export default function ProjectDetail() {
   const { slug } = useParams()
-  const p = projects.find((x) => x.slug === slug) || projects[2]
+  const currentUser = useCurrentUser()
+  const resource = useResource(useCallback(() => projectService.bySlug(slug), [slug]))
+  const p = resource.data ? { ...resource.data, status: resource.data.status === 'passed' ? 'done' : resource.data.status } : { name: 'Projet', slug, tags: [] }
+  const OBJECTIVES = p.objectives || []
+  const CONSTRAINTS = (p.constraints || []).map(c => typeof c === 'string' ? { text: c, icon: 'Info' } : c)
+  const CORRECTIONS = []
+  const DISCUSSIONS = []
+  const moulinetteTests = p.submissions?.[0]?.tests || []
   const [tab, setTab] = useState('description')
 
   usePageHeader(
     { title: p.name, breadcrumb: [{ label: 'Mes projets', to: '/projects' }, { label: p.name }] },
     [p.slug],
   )
+
+  if (resource.loading || resource.error) return <ResourceState resource={resource} />
 
   const passed = moulinetteTests.filter((t) => t.status === 'pass').length
 
@@ -138,9 +121,7 @@ export default function ProjectDetail() {
                     <Icon name="Target" size={16} className="text-brand-500" /> Objectif
                   </h2>
                   <p className="mt-3 text-[13.5px] leading-[1.75] text-ink-soft">
-                    Ce projet consiste à créer un shell simple. Tu vas plonger dans les processus et les
-                    descripteurs de fichiers, et découvrir pourquoi bash est un exploit d'ingénierie
-                    plus qu'un simple programme.
+                    {p.long_description || p.desc}
                   </p>
                   <ul className="mt-4 space-y-2.5">
                     {OBJECTIVES.map((o) => (
@@ -171,7 +152,7 @@ export default function ProjectDetail() {
                     <Icon name="GitFork" size={16} className="text-brand-500" /> Prérequis
                   </h2>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {['libft', 'get_next_line', 'ft_printf', 'pipex'].map((r) => (
+                    {(p.requires ? [p.requires] : []).map((r) => (
                       <Link
                         key={r}
                         to={`/projects/${r}`}
@@ -185,36 +166,7 @@ export default function ProjectDetail() {
               </div>
             )}
 
-            {tab === 'instructions' && (
-              <div className="space-y-5">
-                <div className="rounded-lg border border-info/25 bg-info/[0.06] p-4">
-                  <p className="flex gap-2.5 text-[12.5px] leading-relaxed text-ink-soft">
-                    <Icon name="Info" size={15} className="mt-0.5 shrink-0 text-info" />
-                    Ton code est exécuté dans un conteneur Ubuntu 22.04 isolé, sans accès réseau,
-                    limité à 1 vCPU et 512 Mo de RAM.
-                  </p>
-                </div>
-                {[
-                  { n: '01', t: 'Cloner le dépôt', c: 'git clone git@root404.tn:abdeljalil/minishell.git' },
-                  { n: '02', t: 'Compiler', c: 'make -j4' },
-                  { n: '03', t: 'Vérifier la norme', c: 'norminette src/ includes/' },
-                  { n: '04', t: 'Chasser les fuites', c: 'valgrind --leak-check=full ./minishell' },
-                  { n: '05', t: 'Soumettre', c: 'root404 submit minishell' },
-                ].map((s) => (
-                  <div key={s.n} className="flex gap-4">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-root-850 font-mono text-[11px] font-bold text-brand-500">
-                      {s.n}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-semibold text-ink">{s.t}</p>
-                      <pre className="mt-2 overflow-x-auto rounded-lg border border-line bg-[#080D12] px-3.5 py-2.5 font-mono text-[12px] text-ok">
-                        <code>$ {s.c}</code>
-                      </pre>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {tab === 'instructions' && <p className="text-ink-dim">Ouvre le workspace pour écrire, exécuter et soumettre ton code. L’évaluation nécessite un exécuteur isolé configuré et une suite de tests du projet.</p>}
 
             {tab === 'corrections' &&
               (CORRECTIONS.length ? (
@@ -254,7 +206,7 @@ export default function ProjectDetail() {
                       className="input h-auto resize-none py-2.5"
                     />
                     <div className="mt-2 flex justify-end">
-                      <Button size="sm" icon="Send">Publier</Button>
+                      <Button size="sm" disabled title="Discussions non implémentées" icon="Send">Publication indisponible</Button>
                     </div>
                   </div>
                 </div>
@@ -291,9 +243,9 @@ export default function ProjectDetail() {
             <h2 className="text-[13px] font-bold text-ink">Validations & XP</h2>
             <ul className="mt-4 space-y-3">
               {[
-                { label: 'Moulinette', value: `${passed}/${moulinetteTests.length}`, tone: 'ok', icon: 'Cpu' },
-                { label: 'Peer Review', value: '2 / 3', tone: 'brand', icon: 'Users' },
-                { label: 'AI Review', value: '81/100', tone: 'info', icon: 'Sparkles' },
+                { label: 'Moulinette', value: `${p.submissions?.length || 0} soumissions`, tone: 'ok', icon: 'Cpu' },
+                { label: 'Peer Review', value: 'Non disponible', tone: 'brand', icon: 'Users' },
+                { label: 'AI Review', value: 'Non effectué', tone: 'info', icon: 'Sparkles' },
                 { label: 'Bonus', value: 'Non tenté', tone: 'muted', icon: 'Gift' },
               ].map((r) => (
                 <li key={r.label} className="flex items-center gap-3">

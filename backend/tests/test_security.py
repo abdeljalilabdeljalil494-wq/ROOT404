@@ -264,8 +264,9 @@ class TestProjectSecurity:
             json={"files": {"test.c": "<script>alert('xss')</script>\nint main() { return 0; }"}, "language": "c"},
             headers={"Authorization": f"Bearer {token}"}
         )
-        # Should succeed but code stored safely
-        assert resp.status_code in [200, 400]  # May be blocked by forbidden patterns check
+        # No configured executor/suite: must not pretend to compile or persist success.
+        assert resp.status_code == 503
+        assert "score" not in resp.json()
 
 class TestRateLimiting:
     def test_auth_rate_limit(self):

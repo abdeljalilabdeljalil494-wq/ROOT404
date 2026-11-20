@@ -1,10 +1,11 @@
-FROM node:20-alpine AS builder
+# syntax=docker/dockerfile:1.7
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
 # Install deps with cache
 COPY package.json package-lock.json ./
-RUN npm ci --only=production --ignore-scripts && \
+RUN npm ci --ignore-scripts && \
     npm cache clean --force
 
 COPY . .
@@ -12,7 +13,7 @@ COPY . .
 # Build with security checks
 RUN npm run build && \
     # Remove source maps in production for security
-    find dist -name "*.map" -delete 2>/dev/null || true
+    find dist -name "*.map" -delete
 
 FROM nginx:alpine
 
@@ -36,12 +37,20 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' http://backend:8000;" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self';" always;
 
     # Gzip
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml;
     gzip_min_length 1000;
+
+    # Authorization codes/state must never enter access logs or outgoing referrers.
+    location /oauth/callback/ {
+        access_log off;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Cache-Control "no-store" always;
+        try_files $uri /index.html;
+    }
 
     # Frontend routes - SPA fallback
     location / {
@@ -89,6 +98,12 @@ server {
         deny all;
         access_log off;
         log_not_found off;
+    }
+
+    location = /ready {
+        proxy_pass http://backend:8000/ready;
+        access_log off;
+        add_header Cache-Control "no-store" always;
     }
 
     # Health check

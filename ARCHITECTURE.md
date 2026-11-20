@@ -1,213 +1,135 @@
-# ROOT 404 — Architecture Documentation
+# ROOT404 architecture — source-reconciled 2026-11-18
 
-## Overview
+## Product direction retained
+ROOT404 remains a project-based peer-learning platform with gamification, Socratic
+mentoring, collaboration, competitive learning and portfolio/hiring ambitions.
+See [product vision](docs/PRODUCT_VISION.md) for the full original design. A model,
+route or screen is not proof that the corresponding product workflow is delivered.
 
-ROOT 404 is a full-stack **Developer Learning Operating System**, inspired by École 42, built for Tunisian coders. It combines:
-
-- **Frontend**: React 18 + Vite 5 + Tailwind + Monaco Editor
-- **Backend**: FastAPI + SQLAlchemy + SQLite/Postgres + JWT OTP
-- **Sandbox**: Docker Ubuntu 22.04 isolated runners (C, C++, Python, JS)
-- **AI Mentor**: Socratic hints, 5 levels, anti-cheating
-- **Real-time**: Rooms, Peer Review, Arena (WebSocket-ready)
-
-## System Diagram
-
-```
-                    ┌─────────────────────────────────────────┐
-                    │   Front-End: React + Monaco Editor      │
-                    │   PublicLayout / AppLayout / Workspace  │
-                    └────────────────────┬────────────────────┘
-                                         │ REST / WS
-                                         ▼
-                    ┌─────────────────────────────────────────┐
-                    │    Back-End API Engine (FastAPI)        │
-                    │  Auth (OTP), Judge, AI, Peer Review     │
-                    │  Black Hole, Coalitions, Gamification   │
-                    └──────┬──────────────┬──────────────┬────┘
-                           │              │              │
-          ┌────────────────┘              │              └────────────────┐
-          ▼                               ▼                               ▼
-┌───────────────────┐           ┌───────────────────┐           ┌───────────────────┐
-│  PostgreSQL /     │           │ Docker Containers │           │  AI Assistant API │
-│  SQLite DB        │           │ Ubuntu + Runners  │           │ Socratic Hints     │
-│  Users, Projects  │           │ Moulinette Engine │           │ & Code Review      │
-│  Submissions,     │           │ Polyglot          │           │                    │
-│  Rooms, etc.      │           │                   │           │                    │
-└───────────────────┘           └───────────────────┘           └───────────────────┘
-                           │
-                           ▼
-                ┌───────────────────────┐
-                │  WebRTC Correction     │
-                │  Rooms (Peer Review)   │
-                └───────────────────────┘
+## Implemented topology
+```text
+Browser: React 18 + Vite + Tailwind + Monaco
+    /api (relative URLs)
+    -> Vite development proxy OR intended Nginx production proxy
+    -> FastAPI routers -> SQLAlchemy -> SQLite locally / PostgreSQL in production
+                              |-> SQL OTP, request budgets, JWT revocations
+                              |-> project/account/community records
+                              |-> mentor interaction history (migration0003), privacy/session epoch (0004), private notifications (0005)
+    -> SMTP SSL or STARTTLS delivery boundary (local verified STARTTLS mailbox; external unverified)
+    -> fixed OpenAI HTTPS boundary (test-double verified)
+    -> optional configured /v1/execute HTTP boundary (dispatcher supplied; Docker/runsc NOT runtime-verified)
+Optional Redis: cache/readiness; NOT the authority for OTP or request throttles.
 ```
 
-## Backend Modules
+FastAPI entry: `backend/app/main.py`; API composition: `app/api/router.py`.
+React entry/routes: `frontend/src/App.jsx`; client contracts: `src/services/api.js`.
+No backend process executes submitted code directly. Browser code must use `/api`,
+not sandbox localhost URLs. Preview/dev servers bind 0.0.0.0.
 
-### Core
-- `config.py`: pydantic-settings, env vars, defaults to SQLite
-- `database.py`: engine, SessionLocal, Base, init_db()
-- `security.py`: JWT creation/verification, OTP generation (hashed, 10min expiry, in-memory store for dev), bcrypt
-- `dependencies.py`: get_current_user (JWT Bearer), rate limiting (in-memory)
+## Persistence and migrations
+`backend/migrations/versions/0001_initial.py` is the frozen domain baseline;
+0002 adds shared authentication state;0003 adds mentor interactions;0004 adds
+private portfolio/directory preferences and a global session epoch;0005 adds private in-app notifications.
+Production checks migration head and refuses an outdated database; create_all is
+only a development convenience. Existing deployments need schema comparison,
+backup/restore rehearsal, then migrations, never blind stamping or data deletion.
+SQLite and actual PostgreSQL16.2 upgrades/data preservation are tested. Native
+PostgreSQL limiter/OTP concurrency and pg_dump/restore pass locally; target deploy
+PostgreSQL15/current patches and production operations remain unverified.
 
-### Models (SQLAlchemy)
-- `User`: id, username, email, display_name, level (float 0-21), xp, projects_done, correction_points, campus, coalition_id, blackhole_days_left, is_active, is_mentor, skills (JSON), badges (JSON)
-- `Project`: slug, name, description, level, lang, tags, xp, difficulty, requires (slug), objectives, constraints
-- `UserProjectProgress`: user_id, project_id, status (locked/available/progress/passed/failed), progress %, score, attempts, best_score
-- `Submission`: user_id, project_id, files (JSON), language, status, score, tests (JSON), logs, ai_review, similarity_score
-- `Correction`: submission_id, author_id, corrector_id, status, score, checklist (JSON), scheduled_at, room_id
-- `CorrectionSlot`: corrector_id, project_id, start_time, end_time, is_booked
-- `Room`: name, type (study/correction/pair/competition/mentor/live), project, host_id, capacity, tags
-- `RoomMember`, `RoomMessage`
-- `Coalition`, `CoalitionMember`, `CoalitionWar`
-- Additional: `DailyMission`, `Badge`, `UserBadge`, `AuditLog`, `ArenaMatch`, `PiscineDay`, `UserPiscineProgress`
+## Authentication and abuse controls
+OTP HMAC, expiry, bounded attempts and atomic consumption use SQL. Email requests
+have a shared budget; bearer JWT logout persists revocations. General configured
+IP/auth/judge route limits use atomic SQL fixed windows, not process memory. Route
+prefix + client IP prevents literal path churn bypass; forwarded IP headers are
+accepted only through configured trusted proxies. These are route-scoped controls,
+not comprehensive edge/DDoS protection. Cleanup of expired auth state is an operator
+job. AI ask and both review routes share a SQL per-account hourly budget (default30).
+SQL outage fails closed; targeted actual PostgreSQL concurrency passes. Deployment
+load/high-volume/edge controls remain unverified.
 
-### Services
-- `judge.py`: `run_moulinette()` simulates deterministic scoring based on code hash, `run_code_in_sandbox()` checks forbidden patterns, `JudgeService.check_plagiarism()` Jaccard bigram similarity, `analyze_complexity()`
-- `ai_helper.py`: `detect_topic()` keyword matching, `get_socratic_hint()` 5 levels, `analyze_code_review()` metrics + notes, `AIMentorService.ask()`, `detect_cheating()`
-- `blackhole.py`: `calculate_days_left()` = total - inactive_days + projects_last_30d*7 + level*2, warning <=7, absorbed <=0, `run_daily_check()` cron
-- `correction.py`: `find_best_corrector()` scoring: reputation*0.5 + level proximity + campus bonus - recent pairs*30 + open slots*10 + random, `get_checklist_for_project()`, `calculate_correction_points()`
-- `coalition.py`: leaderboard, auto-assign to smallest, add_points, wars
-- `room_service.py`: create, join (capacity check), leave, members, messages, list, details
-- `gamification.py`: XP thresholds exponential `1000*1.25^n`, `xp_to_level()`, `add_xp()`, `complete_project()` with bonus, `generate_daily_mission()` based on weakest skill, `check_streak()` + burnout detection
-- `skill_graph.py`: groups C/Algorithms/Systems/Tooling, project→skill weight map, `update_from_submission()` gain = weight*score/100*0.1, gaps <50
-- `integrity.py`: 5 factors (similarity, typing, submission pattern, AI dependency, peer review), `check_plagiarism()` fingerprint MD5 + Jaccard tokens, `log_action()` to AuditLog
+## AI: actual boundaries and limitations
+`app/services/ai_provider.py` sends bounded context to OpenAI, rejects redirects,
+oversized/malformed/failed responses, and returns 503 on failure/unconfigured
+provider. No random quality grades or template fallback in ask/review paths.
+Successful responses and user questions are persisted with user ownership; review
+history records a descriptor rather than the submitted code. Provider output may
+itself quote code. Users may include secrets in questions: account deletion/export and explicit retention tooling exist; operator scheduling,
+backup/provider erasure and consent processing policies remain outstanding. History is capped to the last 1–100 interactions;
+there are no separate threads, no conversational replay to the model, no retrieval
+pipeline or guaranteed Socratic quality. Mentor UI uses real APIs; attachments and
+micro-challenge evaluation are disabled. Legacy scripted helper functions remain
+in source but do not serve production ask/review. Lexical cheating/similarity and
+complexity checks are heuristics, not proof or execution.
 
-### API Routers
-All under `/api` prefix:
-- `auth`: OTP request/verify, register, me, me/full (with skills, integrity, daily mission, streak)
-- `projects`: list with filters (status, lang, q), by slug, submit (runs moulinette, plagiarism, unlocks next, XP, skill update), submissions, seed
-- `dashboard`: stats, activity, weekly, overview (aggregates), heatmap
-- `leaderboard`: global with campus/coalition filters, coalitions, campus, arena
-- `rooms`: list, create, get details, join/leave, messages, members, seed
-- `judge`: run code, moulinette/{slug}, review, plagiarism, complexity, runners list
-- `ai`: history, ask, review, levels, gaps, detect-cheating
-- `analytics`: overview (velocity, consistency, tolerance, timeToSolve), skills, journey, heatmap, reputation, integrity, blackhole, velocity
-- `peer_review`: list (by role), request, get, review (score + checklist), slots create/list/book
-- `coalitions`: list, join, wars, me
-- `piscine`: days (with user progress), stats, seed
-- `arena`: modes, live matches, create/join match, leaderboard
-- `portfolio`: by username (public), me, widget
-- `hiring`: companies, challenges, apply, fair
-- `exam`: tracks, start (random exercises), submit, history, gates
-- `mentorship`: mentors list, request, schedule, sessions, become-mentor
-- Root: health, search
+## Judge: implemented client versus missing executor
+The client POSTs files/language/stdin/limits to configured `/v1/execute` with a
+shared bearer secret, validates bounded results and compares output with DB-owned
+hidden cases. No catalog case set means503. Four foundation stream-sum projects have versioned
+cases across supported languages; advanced catalog harnesses remain missing.
+`judge_sandbox/runners/common.py` compiles/runs trusted test programs with timeout,
+resource/output bounds and cleanup. This subprocess utility is not a security
+boundary for hostile code. Compose's optional `legacy-judge-cli` is a one-shot
+container, not the dispatcher itself. Dedicated host-side dispatcher is in executor_service/;
+it requires immutable image/gVisor/cgroupv2 and never mounts a Docker socket in jobs.
 
-## Frontend Structure
+Implemented topology, still requiring live and independent review: authenticated dispatcher ->
+fresh isolated unprivileged job per request -> bounded result -> guaranteed cleanup.
+Enforce network denial, cgroups/CPU/memory/PID/wall/output/filesystem limits and
+kernel policies. Never expose a Docker socket to the API or submitted code, never
+use unconfined seccomp/AppArmor. Runtime attacks and recovery tests must precede
+public execution. Keep JUDGE_ENABLED=false until that exists and is verified.
 
-```
-src/
-├── main.jsx              # ReactDOM + ThemeProvider + BrowserRouter
-├── App.jsx               # All routes lazy-loaded
-├── styles/index.css      # Tailwind layers + .card/.chip/.input
-├── data/mock.js          # Single source of demo content
-├── services/api.js       # Axios + all services with mock fallback
-├── hooks/
-│   ├── useTheme.jsx      # dark/light, localStorage
-│   └── usePageHeader.js  # pushes title into AppLayout topbar
-├── layouts/
-│   ├── PublicLayout.jsx  # Navbar + Outlet + Footer
-│   └── AppLayout.jsx     # Sidebar + AppTopbar + Outlet
-├── components/
-│   ├── Logo.jsx          # ROOT 404 glyph SVG
-│   ├── ui/               # 14 primitives: Icon, Button, Badge, etc.
-│   ├── layout/           # Navbar, Sidebar, AppTopbar, Footer
-│   └── landing/          # 8 marketing sections
-└── pages/
-    ├── Home.jsx          # Landing with Hero, Pathways, etc.
-    ├── Dashboard.jsx     # Welcome + level + KPI + activity + mission
-    ├── Projects.jsx      # List/grid with filters
-    ├── ProjectDetail.jsx # Objectives, constraints, tabs, submissions
-    ├── Workspace.jsx     # Monaco + file explorer + terminal + moulinette
-    ├── Rooms.jsx / RoomView.jsx
-    ├── PeerReview.jsx
-    ├── Leaderboard.jsx
-    ├── Coalitions.jsx
-    ├── Piscine.jsx
-    ├── Journey.jsx       # Code Journey map
-    ├── SkillGraph.jsx    # Skill bars
-    ├── Analytics.jsx     # 360° dashboard
-    ├── Arena.jsx         # Modes + live duels + leaderboard
-    ├── Mentor.jsx        # Chat with AI, levels, gaps
-    ├── Profile.jsx       # User profile + stats + heatmap
-    ├── Portfolio.jsx     # Public portfolio
-    ├── Hiring.jsx        # Companies + challenges + fair
-    ├── Exam.jsx          # Tracks + gates + history
-    ├── Settings.jsx
-    └── auth/Login.jsx, Register.jsx
-```
+## Incomplete product components
+Rooms have persistence but no implemented WebSocket/collaborative audio/video.
+Peer review lacks full matching/booking/collusion lifecycle; Arena lacks verified
+winner/evaluation/deadline lifecycle. Scheduled Black Hole/mission/streak operations
+are not demonstrated as a deployed scheduler. Hiring/exam/mentorship routes are
+development-demo gated; their fixtures are not external integrations. Many frontend
+pages remain PrototypeFeature-gated. There is no delivered multi-campus tenancy,
+public developer ecosystem, hiring delivery or production analytics prediction.
 
-### Design System
-- Colors sampled from mockups: brand 500 #F8851F, root 950 #04090E, etc. in `tailwind.config.js`
-- Typography: Inter (UI), JetBrains Mono (code), Noto Kufi Arabic (RTL)
-- Utilities: .card, .chip, .input, .select, .container-page, .no-scrollbar, bg-grid, bg-dots
-- Dark by default, light variant via `useTheme`
+## Verification levels
+119local backend/controller tests and30frontend tests plus lint/build pass. HTTP test-double
+integration proves API/provider contract/persistence behavior, not live provider
+quality or Internet SMTP delivery. Real local STARTTLS mailbox receipt and actual
+PostgreSQL/Redis integrations pass; see docs/LIVE_SERVICE_VERIFICATION.md. No Docker build/start, target PostgreSQL15 deployment test,
+production Nginx/TLS deployment, hostile sandbox or full browser journey was run.
+See FEATURE_COMPLETION_MATRIX.md; nothing is production-verified.
 
-### API Integration
-- `services/api.js` has `USE_MOCK = VITE_USE_MOCK !== 'false'`
-- `resolve(mockValue, request)` either returns mock after delay or real HTTP
-- When `VITE_USE_MOCK=false`, all services hit `/api/...` proxied to `VITE_API_TARGET` (default http://localhost:8000)
-- JWT from `localStorage.root404_token` added by interceptor, 401 clears it
+## Privacy control plane
+Migration0004/API account routes + Settings implement owner profile/preferences,
+export/deletion/recent-auth and atomic all-session epoch revocation. Public portfolio
+and directory are opt-in. Explicit CLI retention defaults30/90days and defensive
+log redaction are supplied. Backup/provider deletion and independent audit remain
+release gates; docs/PRIVACY_RETENTION.md names exact limitations.
 
-## Judge Sandbox
+## Current distinct-identity worker and product event paths
+Host controller -> immutable Docker/runsc image -> trusted UID0 bounded protocol
+supervisor -> forked compiler/learner UID/GID1000, zero groups/capabilities.
+Supervisor has exactly5capabilities and no-new-privileges; it owns the only trusted
+result stdout. Learner pipes are captured/limited and treated purely as data.
+Host controls image/argv/runtime, never learner commands. Hidden expected outputs
+remain server-side. Native fixed identity probe is real; Docker enforcement is NOT
+yet verified, so public judging remains disabled. See executor_service/README.md.
 
-```
-judge_sandbox/
-├── runner.py             # Main entry, creates temp workdir, writes files, calls language runner
-├── Dockerfile.runner     # ubuntu:22.04 + gcc, python3, node, valgrind, user judge, no network
-└── runners/
-    ├── runner_c.py       # Norminette sim, Makefile check, compilation, valgrind, functional
-    ├── runner_cpp.py     # C++98 check
-    ├── runner_python.py  # py_compile + execution with timeout
-    └── runner_js.py      # node --check + execution
-```
+Review slot booking/final feedback writes owner-scoped notifications in the same
+transaction. PostgreSQL row locks/CAS and atomic reward increments prevent duplicate
+bookings/awards; SQLite/API and actual native PG competing calls are tested. Read
+APIs are bounded, private and no-store. Explicit retention includes notifications.
+Active React views now connect basic review/notification/profile/portfolio,
+measured learning indicators/analytics/leaderboards/search. Gated original
+advanced prototypes remain source-preserved. Monaco and worker are built locally,
+not fetched from CDN. Full IDE/multifile/realtime scope is still incomplete.
 
-In production, backend would spawn `docker run --network none --memory 512m --cpus 1 --pids-limit 64` with `judge_sandbox` image.
-
-For dev, `services/judge.py` simulates with deterministic random based on code hash.
-
-## Security
-
-- OTP hashed with SHA256, 10min expiry, max 5 attempts, in-memory store (would be Redis in prod)
-- JWT HS256, 7 days expiry, Bearer
-- Sandbox: no network, 512m, 1 vCPU, 30s timeout, 64 pids limit, read-only rootfs, tmpfs /tmp
-- Plagiarism: AST-like fingerprint (normalize + MD5 + Jaccard tokens)
-- Integrity Score: 5 factors, human review required if <50
-- AuditLog: every sensitive action logged with user_id, action, resource, ip
-- Rate limiting: in-memory per IP, 100 req/60s
-
-## Gamification & Learning
-
-- Level 0.00-21.00 continuous, exponential XP curve
-- XP earned = project XP * score% + 15% bonus if 100%
-- Jetons on level up, account value
-- Streak + anti-burnout (detects >20 streak + high workload)
-- Daily Mission based on weakest skill
-- Skill Graph: 4 groups, dynamic update, gaps detection, micro-challenges
-- Black Hole: survival timer, warning zone, absorption, recommendations
-- Coalition Wars: 48h hackathons, points from member achievements
-
-## Deployment
-
-- `docker-compose.yml`: db (postgres:15), redis, backend (FastAPI), judge (no_internet network), frontend (nginx)
-- `frontend/Dockerfile`: multi-stage node:20 build + nginx with SPA fallback + /api proxy
-- `backend/Dockerfile`: python:3.11-slim + uvicorn workers 2 + healthcheck
-- `Makefile`: install, backend, frontend, dev, build, docker-up/down, seed, test
-
-## Future Work (Phase 2-6)
-
-- WebSocket for rooms (currently REST polling)
-- WebRTC for correction rooms
-- Real SMTP for OTP
-- Redis for OTP and caching
-- Alembic migrations
-- OpenAI integration for AI Mentor (currently mock socratic)
-- Corporate dashboard for hiring portal
-- CTF track, AI/ML bootcamp, System Design Labs content
-- Multi-campus tournament logic
-- Mobile app
-
-## Testing
-
-- Backend: `pytest tests/test_api.py` covers health, auth, projects, dashboard, judge, AI, leaderboard, rooms, analytics, portfolio, hiring, exam
-- Frontend: `npm run build` ensures no build warnings, chunks <900kB warning limit, vendor splitting
+## ADR — beta bearer-token storage (external-review intake round)
+Decision: retain the existing localStorage bearer JWT + server-side revocation for
+this beta; do NOT partially migrate auth/OAuth to cookies. localStorage is exposed
+to same-origin XSS; revocation does not prevent theft/reuse before revocation.
+HttpOnly Secure SameSite cookies would reduce JS token access but require a complete
+atomic migration: all OTP/OAuth issuance, API/WebSocket clients, logout/revoke,
+credentialed origins, CSRF tokens/origin validation, callback behavior and browser
+regressions. Cookies alone do not stop same-origin malicious actions. No claim that
+bearer storage is safer overall or production-approved. Revisit after supplied
+review/independent assessment; keep XSS prevention/CSP and narrow token lifetime.
+Current work narrows script CSP without changing OAuth callback/token contracts.

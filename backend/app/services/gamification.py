@@ -53,14 +53,16 @@ def calculate_level_progress(xp: int) -> int:
 
 class GamificationService:
     @staticmethod
-    def add_xp(user: User, amount: int, reason: str, db: Session) -> User:
+    def add_xp(user: User, amount: int, reason: str, db: Session, commit: bool = True) -> User:
+        if type(amount) is not int or amount < 0:
+            raise ValueError('XP awards must be nonnegative trusted integers')
         old_level = xp_to_level(user.xp)
         user.xp += amount
         new_level = xp_to_level(user.xp)
         
         user.level = new_level
         # Update xp_to_next
-        next_level = math.ceil(new_level) if new_level < 21 else 21
+        next_level = min(21, int(new_level) + 1)
         if next_level < len(LEVEL_THRESHOLDS):
             user.xp_to_next = LEVEL_THRESHOLDS[next_level] - user.xp
         else:
@@ -74,11 +76,14 @@ class GamificationService:
         # Update streak logic would be here
         user.last_activity = datetime.utcnow()
         
-        db.commit()
+        if commit:
+            db.commit()
         return user
     
     @staticmethod
-    def complete_project(user: User, project_xp: int, score: int, db: Session) -> dict:
+    def complete_project(user: User, project_xp: int, score: int, db: Session, commit: bool = True) -> dict:
+        if type(project_xp) is not int or project_xp < 0 or type(score) is not int or not 0 <= score <= 100:
+            raise ValueError('Invalid trusted project award')
         # XP based on score
         multiplier = score / 100
         xp_earned = int(project_xp * multiplier)
@@ -88,14 +93,15 @@ class GamificationService:
             xp_earned = int(xp_earned * 1.15)
         
         old_level = user.level
-        GamificationService.add_xp(user, xp_earned, f"Project completed: {score}%", db)
+        GamificationService.add_xp(user, xp_earned, f"Project completed: {score}%", db, commit=False)
         user.projects_done += 1
         
         # Accuracy update
         # Simplified moving average
         user.accuracy = int((user.accuracy * 0.9 + score * 0.1)) if user.accuracy else score
         
-        db.commit()
+        if commit:
+            db.commit()
         
         return {
             "xp_earned": xp_earned,
@@ -146,7 +152,7 @@ class GamificationService:
             title=chosen["title"],
             description=f"Mission quotidienne pour améliorer {chosen['skill']}",
             difficulty=chosen["difficulty"],
-            reward_xp=chosen["xp"],
+            reward_xp=0,  # Suggestions are not executable missions and award no XP.
             skill=chosen["skill"],
             status="available",
             expires_at=datetime.utcnow() + timedelta(days=1)
@@ -158,38 +164,19 @@ class GamificationService:
     
     @staticmethod
     def check_streak(user: User, db: Session) -> dict:
-        # Simplified streak check
-        now = datetime.utcnow()
-        if not user.last_activity:
-            user.streak = 1
-        else:
-            diff = (now - user.last_activity).days
-            if diff == 0:
-                pass  # same day
-            elif diff == 1:
-                user.streak += 1
-            elif diff > 1:
-                user.streak = 1  # reset
-        
-        # Anti-burnout
-        burnout_risk = False
-        recommendation = None
-        if user.streak > 20:
-            # Check workload
-            burnout_risk = True
-            recommendation = {
-                "message": "⚠️ High workload detected",
-                "suggestion": "20 min → Pointer Challenge\n10 min → Review\nThen → Rest",
-                "streak": user.streak
-            }
-        
-        db.commit()
-        return {
-            "streak": user.streak,
-            "burnout_risk": burnout_risk,
-            "recommendation": recommendation
-        }
-    
+        # Read-only measured submission streak in UTC. Repeated page views may
+        # neither create activity nor increment a counter. No reward is issued.
+        from app.models.submission import Submission
+        dates={row[0].date() for row in db.query(Submission.created_at).filter(
+            Submission.user_id==user.id,Submission.created_at>=datetime.utcnow()-timedelta(days=366)).all()}
+        today=datetime.utcnow().date()
+        cursor=today if today in dates else today-timedelta(days=1)
+        streak=0
+        while cursor in dates:
+            streak+=1; cursor-=timedelta(days=1)
+        return {'streak':streak,'burnout_risk':False,'recommendation':None,
+                'basis':'distinct submission days UTC; no medical inference'}
+
     @staticmethod
     def award_badge(user: User, badge_name: str, db: Session):
         badge = db.query(Badge).filter(Badge.name == badge_name).first()

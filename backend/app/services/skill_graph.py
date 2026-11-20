@@ -6,7 +6,6 @@ from app.models.user import User
 from app.models.project import UserProjectProgress, Project
 from app.models.submission import Submission
 from typing import Dict, List
-import random
 
 SKILL_GROUPS = {
     "C": ["Variables", "Pointers", "Memory", "Structs", "Functions"],
@@ -30,11 +29,11 @@ class SkillGraphService:
     def initialize_skills() -> Dict:
         graph = {}
         for group, skills in SKILL_GROUPS.items():
-            graph[group] = {skill: random.randint(10, 30) for skill in skills}
+            graph[group] = {skill: 0 for skill in skills}
         return graph
     
     @staticmethod
-    def update_from_submission(user: User, submission: Submission, project: Project, score: int, db: Session) -> Dict:
+    def update_from_submission(user: User, submission: Submission, project: Project, score: int, db: Session, commit: bool = True) -> Dict:
         if not user.skills:
             user.skills = SkillGraphService.initialize_skills()
         
@@ -46,13 +45,16 @@ class SkillGraphService:
             if group not in user.skills:
                 user.skills[group] = {}
             for skill, weight in skills.items():
-                current = user.skills[group].get(skill, 20)
+                current = user.skills[group].get(skill, 0)
                 # Increase based on score and weight
                 gain = (weight * score / 100) * 0.1  # 10% of weight scaled by score
                 new_val = min(100, current + gain)
                 user.skills[group][skill] = int(new_val)
         
-        db.commit()
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(user, "skills")
+        if commit:
+            db.commit()
         return user.skills
     
     @staticmethod

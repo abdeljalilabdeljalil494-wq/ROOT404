@@ -29,14 +29,6 @@ def get_modes():
 def get_live_matches(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     matches = db.query(ArenaMatch).filter(ArenaMatch.status == "live").order_by(ArenaMatch.created_at.desc()).limit(10).all()
     
-    if not matches:
-        # Mock data
-        return [
-            {"id": 1, "a": "mehdi42", "b": "ines_dev", "problem": "Binary Search", "time": "07:41", "viewers": 128},
-            {"id": 2, "a": "chaimacoder", "b": "skhalifa", "problem": "LRU Cache", "time": "11:05", "viewers": 86},
-            {"id": 3, "a": "nour_dev", "b": "oussama_c", "problem": "Merge Intervals", "time": "02:18", "viewers": 41},
-        ]
-    
     result = []
     for m in matches:
         # Get usernames
@@ -49,7 +41,7 @@ def get_live_matches(current_user: User = Depends(get_current_user), db: Session
             "a": player_a.username if player_a else "unknown",
             "b": player_b.username if player_b else "unknown",
             "problem": m.problem,
-            "time": "05:00",  # Would calculate remaining
+            "time": m.started_at.isoformat() if m.started_at else None,
             "viewers": m.viewers
         })
     
@@ -101,25 +93,5 @@ def join_match(match_id: str, current_user: User = Depends(get_current_user), db
 
 @router.get("/leaderboard")
 def arena_leaderboard(limit: int = 20, db: Session = Depends(get_db)):
-    # Simplified arena leaderboard
-    from app.models.user import User
-    users = db.query(User).order_by(User.xp.desc()).limit(limit).all()
-    
-    result = []
-    for idx, u in enumerate(users, 1):
-        result.append({
-            "rank": idx,
-            "user": u.username,
-            "name": u.display_name,
-            "arena_score": 2400 - idx * 137,
-            "wins": random.randint(5, 30),
-            "avatar": u.avatar_url
-        })
-    
-    if not result:
-        return [
-            {"rank": 1, "user": "mehdi42", "arena_score": 2400, "wins": 24},
-            {"rank": 2, "user": "ines_dev", "arena_score": 2263, "wins": 19},
-        ]
-    
-    return result
+    from app.api.leaderboard import get_arena_leaderboard
+    return get_arena_leaderboard(limit, db)

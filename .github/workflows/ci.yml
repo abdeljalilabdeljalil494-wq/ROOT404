@@ -1,0 +1,51 @@
+name: Quality gates
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r backend/requirements-dev.txt
+      - run: pip install -r executor_service/requirements.txt
+      - name: Metadata-only tracked-secret guard (not a content/history scan)
+        run: python scripts/check_tracked_secrets.py
+      - run: python -m pytest backend/tests executor_service/tests -q
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r ../backend/requirements-dev.txt
+      - name: Real browser tests against disposable API
+        run: npm run test:e2e
+        env:
+          ROOT404_TEST_PYTHON: python
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-evidence-${{ github.sha }}
+          path: .cache/browser-results/
+          retention-days: 3
+      - run: npm audit --audit-level=moderate

@@ -65,15 +65,7 @@ def start_exam(payload: StartExamRequest, current_user: User = Depends(get_curre
 
 @router.post("/submit")
 def submit_exam(payload: SubmitExamRequest, current_user: User = Depends(get_current_user)):
-    # Simulate exam grading
-    score = random.randint(60, 100)
-    return {
-        "exam_id": payload.exam_id,
-        "score": score,
-        "passed": score >= 75,
-        "next_step": "Réserve un slot de correction pour valider",
-        "feedback": "Bon travail sur la gestion mémoire, revois les cas limites pour ft_split"
-    }
+    raise HTTPException(status_code=503, detail="Persistent exam sessions and executable grading suites are not implemented")
 
 @router.get("/history")
 def exam_history(current_user: User = Depends(get_current_user)):

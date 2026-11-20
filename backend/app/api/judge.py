@@ -6,12 +6,11 @@ import re
 import logging
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, judge_rate_limit
+from app.core.dependencies import get_current_user, judge_rate_limit, ai_rate_limit
 from app.core.security import sanitize_input
 from app.core.config import settings
 from app.models.user import User
 from app.services.judge import run_moulinette, run_code_in_sandbox, JudgeService, validate_files
-from app.services.ai_helper import analyze_code_review
 
 logger = logging.getLogger(__name__)
 
@@ -83,28 +82,22 @@ def moulinette(slug: str, payload: RunRequest, request: Request, current_user: U
         result = run_moulinette(slug, payload.files, payload.language)
         logger.info(f"Moulinette {slug} by {current_user.username} - score={result.get('score')}")
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Moulinette failed for {slug}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Moulinette failed")
 
-@router.post("/review", dependencies=[Depends(judge_rate_limit)])
-def code_review(payload: CodeRunRequest, current_user: User = Depends(get_current_user)):
-    try:
-        if len(payload.code) > 100000:
-            raise HTTPException(status_code=400, detail="Code too large")
-        review = analyze_code_review(payload.code, None)
-        return review
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Code review failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Review failed")
+@router.post("/review", dependencies=[Depends(judge_rate_limit), Depends(ai_rate_limit)])
+def code_review(payload: CodeRunRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.ai_provider import review_code
+    return review_code(db, current_user.id, payload.code, payload.language)
 
 @router.post("/plagiarism")
 def check_plagiarism(payload: PlagiarismRequest, current_user: User = Depends(get_current_user)):
     try:
         score = JudgeService.check_plagiarism(payload.code1, payload.code2)
-        return {"similarity": score}
+        return {"similarity": score, "method": "normalized_bigram_jaccard", "proof_of_plagiarism": False}
     except Exception as e:
         logger.error(f"Plagiarism check failed: {e}")
         raise HTTPException(status_code=500, detail="Plagiarism check failed")
@@ -113,37 +106,13 @@ def check_plagiarism(payload: PlagiarismRequest, current_user: User = Depends(ge
 def analyze_complexity(payload: CodeRunRequest, current_user: User = Depends(get_current_user)):
     try:
         analysis = JudgeService.analyze_complexity(payload.code)
-        return analysis
+        return {**analysis, "method": "lexical_heuristic", "execution_verified": False}
     except Exception as e:
         logger.error(f"Complexity analysis failed: {e}")
         raise HTTPException(status_code=500, detail="Analysis failed")
 
 @router.get("/runners")
 def list_runners(current_user: User = Depends(get_current_user)):
-    return {
-        "runners": [
-            {"language": "c", "image": "gcc:12", "enabled": True, "version": "12.2", "hardened": True},
-            {"language": "c++", "image": "gcc:12", "enabled": True, "version": "12.2", "hardened": True},
-            {"language": "python", "image": "python:3.11-slim", "enabled": True, "version": "3.11", "hardened": True},
-            {"language": "javascript", "image": "node:20-slim", "enabled": True, "version": "20", "hardened": True},
-            {"language": "rust", "image": "rust:1.75", "enabled": False, "version": "1.75"},
-            {"language": "go", "image": "golang:1.21", "enabled": False, "version": "1.21"},
-        ],
-        "isolation": {
-            "network": "none",
-            "memory_limit": settings.JUDGE_MEMORY_LIMIT,
-            "cpu_limit": str(settings.JUDGE_CPU_LIMIT),
-            "timeout": settings.JUDGE_TIMEOUT,
-            "pids_limit": 64,
-            "read_only_rootfs": True,
-            "no_new_privileges": True,
-            "seccomp": True,
-            "cap_drop": "ALL"
-        },
-        "security": {
-            "forbidden_patterns": True,
-            "path_traversal_protection": True,
-            "file_size_limits": True,
-            "output_truncation": True
-        }
-    }
+    return {"configured": bool(settings.JUDGE_ENABLED and settings.JUDGE_URL),
+            "runners": [{"language": language, "enabled": bool(settings.JUDGE_ENABLED and settings.JUDGE_URL),
+                         "isolation_verified": False} for language in ["c", "cpp", "python", "javascript"]]}

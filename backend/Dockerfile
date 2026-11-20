@@ -24,23 +24,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean \
-    # Remove setuid binaries
-    && find / -type f -perm -4000 -delete 2>/dev/null || true
+    && apt-get clean
 
 # Copy installed packages from builder
 COPY --from=builder /root/.local /home/appuser/.local
 
-# Copy app with correct permissions
+# Create user before COPY resolves its ownership
+RUN useradd -m -s /bin/false -u 1000 appuser
 COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser migrations/ ./migrations/
+COPY --chown=appuser:appuser alembic.ini ./alembic.ini
 
 # Create non-root user with no shell
-RUN useradd -m -s /bin/false -u 1000 appuser && \
-    chown -R appuser:appuser /app && \
+RUN chown -R appuser:appuser /app && \
     chmod -R 750 /app && \
     mkdir -p /app/.cache && chown appuser:appuser /app/.cache && chmod 700 /app/.cache && \
     # Remove unnecessary files
-    rm -rf /app/__pycache__ /app/*/__pycache__ 2>/dev/null || true
+    rm -rf /app/__pycache__ /app/*/__pycache__
 
 USER appuser
 

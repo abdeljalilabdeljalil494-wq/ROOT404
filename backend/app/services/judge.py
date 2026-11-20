@@ -1,12 +1,5 @@
-"""
-Moulinette / Judge Engine — Polyglot Execution Engine
-Hardened version with security checks, resource limits, and input validation.
-Simulates Docker sandbox execution for development.
-When JUDGE_ENABLED=True, would call real Docker with strict isolation.
-"""
+"""Judge service client and server-owned executable test evaluation. No simulation."""
 import time
-import random
-import hashlib
 import re
 import logging
 from typing import Dict, List, Tuple
@@ -30,13 +23,13 @@ FORBIDDEN_PATTERNS = {
     "python": [
         r'os\.system', r'subprocess', r'socket', r'__import__',
         r'eval\s*\(', r'exec\s*\(', r'open\s*\(\s*["\']\/etc',
-        r'import\s+os', r'from\s+os\s+import', r'import\s+sys',
-        r'pty\.', r'tty\.', r'input\s*\(',  # Interactive
+        r'import\s+os', r'from\s+os\s+import',
+        r'pty\.', r'tty\.',
     ],
     "javascript": [
-        r'require\s*\(\s*["\']child_process', r'require\s*\(\s*["\']fs',
+        r'require\s*\(\s*["\']child_process',
         r'process\.env', r'eval\s*\(', r'Function\s*\(',
-        r'import\s+.*\s+from\s+["\']fs', r'fetch\s*\(', r'XMLHttpRequest',
+        r'fetch\s*\(', r'XMLHttpRequest',
     ],
 }
 
@@ -53,93 +46,35 @@ MAX_FILE_SIZE = settings.JUDGE_MAX_FILE_SIZE
 MAX_TOTAL_SIZE = settings.JUDGE_MAX_TOTAL_SIZE
 MAX_FILES = settings.JUDGE_MAX_FILES
 
-# Test templates per project type
-MOULINETTE_TEMPLATES = {
-    "c": [
-        {"name": "Norminette", "weight": 15},
-        {"name": "Makefile (rules & flags)", "weight": 10},
-        {"name": "Fuites mémoire (valgrind)", "weight": 20},
-        {"name": "Compilation -Wall -Wextra -Werror", "weight": 15},
-        {"name": "Tests fonctionnels", "weight": 30},
-        {"name": "Cas limites", "weight": 10},
-    ],
-    "default": [
-        {"name": "Norme / Style", "weight": 20},
-        {"name": "Compilation / Execution", "weight": 25},
-        {"name": "Tests fonctionnels", "weight": 35},
-        {"name": "Cas limites", "weight": 10},
-        {"name": "Performance", "weight": 10},
-    ]
-}
-
-PROJECT_TESTS = {
-    "get_next_line": [
-        {"name": "Norminette", "detail": "OK"},
-        {"name": "Makefile", "detail": "OK"},
-        {"name": "Fuites mémoire", "detail": "0 bytes lost"},
-        {"name": "Lecture simple", "detail": "OK"},
-        {"name": "Multi FD", "detail": "OK"},
-        {"name": "BUFFER_SIZE variable", "detail": "OK"},
-    ],
-    "ft_printf": [
-        {"name": "Norminette", "detail": "OK"},
-        {"name": "Makefile", "detail": "OK"},
-        {"name": "Fuites mémoire", "detail": "0 bytes lost"},
-        {"name": "Conversions cspdiuxX%", "detail": "OK"},
-        {"name": "Flags et largeur", "detail": "OK"},
-        {"name": "Cas limites", "detail": "OK"},
-    ],
-    "minishell": [
-        {"name": "Norminette", "detail": "OK"},
-        {"name": "Makefile (rules & flags)", "detail": "OK"},
-        {"name": "Fuites mémoire (valgrind)", "detail": "0 bytes lost"},
-        {"name": "Builtins (echo, cd, pwd, env)", "detail": "OK"},
-        {"name": "Pipes & redirections", "detail": "38/38"},
-        {"name": "Heredoc multi-niveaux", "detail": "2 cas limites"},
-        {"name": "Signaux (SIGINT / SIGQUIT)", "detail": "Ctrl-\\ non géré"},
-    ],
-    "philosophers": [
-        {"name": "Norminette", "detail": "OK"},
-        {"name": "Data races (thread sanitizer)", "detail": "OK"},
-        {"name": "Deadlock detection", "detail": "OK"},
-        {"name": "5 philosophes / 800ms", "detail": "OK"},
-        {"name": "1 philosophe", "detail": "doit mourir"},
-        {"name": "Fuites mémoire", "detail": "OK"},
-    ]
-}
-
 def validate_files(files: Dict[str, str], language: str = "c") -> Tuple[bool, str]:
     """Validate uploaded files for security and resource limits"""
+    language = {"py": "python", "js": "javascript", "c++": "cpp"}.get(language.lower(), language.lower())
     if not files:
         return False, "No files provided"
-    
+
     if len(files) > MAX_FILES:
         return False, f"Too many files. Max {MAX_FILES} allowed"
-    
+
+    if not any(isinstance(content, str) and content.strip() for content in files.values()):
+        return False, "Empty code submission"
     total_size = 0
     for filename, content in files.items():
-        # Validate filename
-        if len(filename) > MAX_FILENAME_LENGTH:
-            return False, f"Filename too long: {filename[:50]}..."
-        
-        # Prevent path traversal
-        if ".." in filename or filename.startswith("/") or "\\" in filename:
-            return False, f"Invalid filename (path traversal detected): {filename}"
-        
-        # Check for null bytes
-        if "\x00" in filename:
-            return False, f"Invalid filename (null byte): {filename}"
-        
+        # Same ASCII/segment grammar as the dispatcher and minimal launcher.
+        # Isolation remains the primary control; source regexes are defense only.
+        if (not isinstance(filename,str) or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_./-]{0,99}',filename)
+                or any(part in {'','.','..'} or part.startswith('.') for part in filename.split('/'))):
+            return False, "Invalid source filename"
+
         # Validate content size
         if not isinstance(content, str):
             return False, f"Invalid content type for {filename}"
-        
+
         size = len(content.encode('utf-8'))
         if size > MAX_FILE_SIZE:
             return False, f"File too large: {filename} ({size} bytes, max {MAX_FILE_SIZE})"
-        
+
         total_size += size
-        
+
         # Check forbidden patterns
         patterns = FORBIDDEN_PATTERNS.get(language, [])
         for pattern in patterns:
@@ -150,252 +85,103 @@ def validate_files(files: Dict[str, str], language: str = "c") -> Tuple[bool, st
             except re.error:
                 # Invalid regex, skip
                 continue
-    
+
     if total_size > MAX_TOTAL_SIZE:
         return False, f"Total size too large: {total_size} bytes, max {MAX_TOTAL_SIZE}"
-    
+
     return True, ""
 
-def _hash_code(files: Dict[str, str]) -> str:
-    combined = "".join(sorted(files.values()))
-    return hashlib.sha256(combined.encode()).hexdigest()[:12]
+def _execute(files: Dict[str, str], language: str, test_input: str = "") -> dict:
+    """Authenticated service boundary. Never runs submitted code in the API process.
 
-def simulate_execution(files: Dict[str, str], language: str = "c") -> Tuple[int, List[dict], str]:
-    """Simulate code execution in isolated container with validation"""
-    # Validate first
-    valid, msg = validate_files(files, language)
+    Deployment must supply a separately audited, per-job isolated executor. The
+    repository CLI runner alone is NOT such a service.
+    """
+    import httpx
+    from fastapi import HTTPException
+    from pydantic import BaseModel, Field, ValidationError
+    from typing import Literal
+
+    from app.core.judge_protocol import verify
+    import uuid, time, json
+
+    valid, message = validate_files(files, language)
     if not valid:
-        return 0, [{"name": "Validation", "status": "fail", "detail": msg}], f"Validation failed: {msg}"
-    
-    code_hash = _hash_code(files)
-    # Use hash as seed for deterministic results, but don't use random.seed globally
-    rng = random.Random(code_hash)
-    
-    exec_time = rng.uniform(0.5, 3.5)
-    
-    all_code = "".join(files.values()).lower()
-    has_main = "main" in all_code or "def " in all_code or "function" in all_code
-    is_empty = len(all_code.strip()) < 20
-    
-    if is_empty:
-        tests = [
-            {"name": "Fichiers présents", "status": "fail", "detail": "Aucun code détecté"},
-            {"name": "Compilation", "status": "fail", "detail": "Échec"},
-        ]
-        return 0, tests, "Erreur: aucun code soumis"
-    
-    template = PROJECT_TESTS.get("minishell")
-    tests = []
-    passed = 0
-    for t in template:
-        r = rng.random()
-        if "main" in all_code or len(all_code) > 200:
-            if r < 0.85:
-                status = "pass"
-                passed += 1
-            elif r < 0.93:
-                status = "warn"
-            else:
-                status = "fail"
-        else:
-            if r < 0.6:
-                status = "pass"
-                passed += 1
-            elif r < 0.8:
-                status = "warn"
-            else:
-                status = "fail"
-        tests.append({
-            "name": t["name"],
-            "status": status,
-            "detail": t["detail"] if status == "pass" else ("2 cas limites" if status == "warn" else "Échec")
-        })
-    
-    score = int((passed / len(tests)) * 100) if tests else 0
-    if "malloc" in all_code and "free" in all_code:
-        score = min(100, score + 5)
-    
-    logs = f"""$ cc -Wall -Wextra -Werror -Iincludes -c src/*.c
-$ cc obj/*.o -lreadline -o minishell
-$ ./minishell < test_cases.txt
-Tests: {passed}/{len(tests)} passed
-Score: {score}/100
-Execution time: {exec_time:.2f}s
-Container: ubuntu:22.04 (isolated, no network, id: {code_hash})
-Memory limit: {settings.JUDGE_MEMORY_LIMIT} | CPU: {settings.JUDGE_CPU_LIMIT} vCPU
-Security: seccomp, no-new-privileges, read-only rootfs
-"""
-    return score, tests, logs
+        raise HTTPException(status_code=400, detail=message)
+    if not settings.JUDGE_ENABLED or not settings.JUDGE_URL.startswith("https://") or len(settings.JUDGE_SHARED_SECRET) < 48 or not settings.JUDGE_EXPECTED_IMAGE:
+        raise HTTPException(status_code=503, detail="Isolated code executor is not configured")
+    identity=uuid.uuid4().hex
+    payload={"files":files,"language":language,"stdin":test_input,
+             "timeout_seconds":settings.JUDGE_TIMEOUT,"output_limit_bytes":65536}
+    try:
+        import ssl
+        context = ssl.create_default_context(cafile=settings.JUDGE_CA_FILE or None)
+        with httpx.Client(verify=context, timeout=httpx.Timeout(connect=5, read=2 * settings.JUDGE_TIMEOUT + 40, write=10, pool=5), follow_redirects=False, trust_env=False) as client:
+            with client.stream("POST", settings.JUDGE_URL.rstrip("/") + "/v2/execute",
+                headers={"Authorization": f"Bearer {settings.JUDGE_SHARED_SECRET}",
+                         "X-Root404-Request-ID":identity,"X-Root404-Request-Time":str(int(time.time()))},
+                json=payload) as response:
+                response.raise_for_status()
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    body.extend(chunk)
+                    if len(body) > 262144:
+                        raise ValueError("Oversized executor response")
+                return verify(settings.JUDGE_SHARED_SECRET,identity,payload,json.loads(body),expected_image=settings.JUDGE_EXPECTED_IMAGE)
+    except (httpx.HTTPError, ValidationError, ValueError):
+        logger.warning("Executor unavailable or returned an invalid result")
+        raise HTTPException(status_code=503, detail="Isolated code executor unavailable")
+
 
 def run_moulinette(project_slug: str, files: Dict[str, str], language: str = "c") -> dict:
-    """Main entry point for Moulinette with security validation"""
-    # Sanitize project_slug to prevent injection
-    if not re.match(r'^[a-zA-Z0-9_-]+$', project_slug):
-        return {
-            "project_slug": "invalid",
-            "score": 0,
-            "tests": [{"name": "Validation", "status": "fail", "detail": "Invalid project slug"}],
-            "passed": 0,
-            "total": 1,
-            "logs": "Invalid project slug format",
-            "execution_time": 0.1
-        }
-    
-    # Validate language
-    allowed_languages = ["c", "cpp", "c++", "python", "javascript", "js"]
-    if language not in allowed_languages:
-        return {
-            "project_slug": project_slug,
-            "score": 0,
-            "tests": [{"name": "Validation", "status": "fail", "detail": f"Language {language} not supported"}],
-            "passed": 0,
-            "total": 1,
-            "logs": f"Unsupported language: {language}",
-            "execution_time": 0.1
-        }
-    
-    # Validate files
-    valid, msg = validate_files(files, language)
-    if not valid:
-        return {
-            "project_slug": project_slug,
-            "score": 0,
-            "tests": [{"name": "Validation", "status": "fail", "detail": msg}],
-            "passed": 0,
-            "total": 1,
-            "logs": f"Validation failed: {msg}",
-            "execution_time": 0.1
-        }
-    
-    template = PROJECT_TESTS.get(project_slug, PROJECT_TESTS["minishell"])
-    code_hash = _hash_code(files)
-    rng = random.Random(code_hash + project_slug)
-    
-    all_code = "".join(files.values())
-    is_empty = len(all_code.strip()) < 10
-    
-    if is_empty:
-        return {
-            "project_slug": project_slug,
-            "score": 0,
-            "tests": [{"name": "Soumission", "status": "fail", "detail": "Vide"}],
-            "passed": 0,
-            "total": 1,
-            "logs": "Aucun fichier soumis",
-            "execution_time": 0.1
-        }
-    
+    from fastapi import HTTPException
+    from app.core.database import SessionLocal
+    from app.models.project import Project
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", project_slug):
+        raise HTTPException(status_code=400, detail="Invalid project slug")
+    from app.services.grading_contracts import original_eligibility
+    if original_eligibility(project_slug) is not None:
+        raise HTTPException(503,'Original project-specific harness and approved contract are not configured')
+    with SessionLocal() as db:
+        project = db.query(Project).filter_by(slug=project_slug).first()
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        cases = project.test_cases
+        allowed_languages = (project.norm_rules or {}).get("allowed_languages")
+        canonical_language = {"c++": "cpp", "py": "python", "js": "javascript"}.get(language, language)
+        if allowed_languages and canonical_language not in allowed_languages:
+            raise HTTPException(status_code=400, detail="Language is not allowed for this project suite")
+    if not cases:
+        raise HTTPException(status_code=503, detail="Executable test suite not configured for this project")
+    if len(cases) > 100 or any(not isinstance(case, dict) or
+        not isinstance(case.get("stdin", ""), str) or not isinstance(case.get("expected_stdout"), str) or
+        len(case.get("stdin", "").encode()) > 10240 or
+        len(case.get("expected_stdout", "").encode()) > 65536 for case in cases):
+        raise HTTPException(status_code=503, detail="Invalid project test suite configuration")
     tests = []
-    passed = 0
-    for t in template:
-        r = rng.random()
-        bonus = min(0.2, len(all_code) / 5000)
-        if r < (0.75 + bonus):
-            status = "pass"
-            passed += 1
-            detail = t["detail"]
-        elif r < 0.88:
-            status = "warn"
-            detail = "2 cas limites"
-        else:
-            status = "fail"
-            detail = "Échec"
-            if "Signal" in t["name"]:
-                detail = "Ctrl-\\ non géré"
-        tests.append({"name": t["name"], "status": status, "detail": detail})
-    
-    score = int((passed / len(template)) * 100)
-    logs = f"""=== ROOT 404 Moulinette v2.1 (Hardened) ===
-Project: {project_slug}
-Language: {language}
-Container: ubuntu:22.04 (id: {code_hash})
-Isolation: network=none, cpu={settings.JUDGE_CPU_LIMIT}, memory={settings.JUDGE_MEMORY_LIMIT}, pids=64, no-new-privileges, seccomp, read-only rootfs
+    grading_started = time.monotonic()
+    elapsed = 0.0
+    for index, case in enumerate(cases):
+        if time.monotonic() - grading_started > 120:
+            raise HTTPException(status_code=503, detail="Project grading deadline exceeded; no grade awarded")
+        result = _execute(files, language, case.get("stdin", ""))
+        passed = result["status"] == "success" and result["exit_code"] == 0 and result["output"].replace("\r\n", "\n").rstrip("\n") == case["expected_stdout"].replace("\r\n", "\n").rstrip("\n")
+        # Do not return hidden inputs, expected outputs, or program output.
+        tests.append({"name": f"Test {index + 1}", "status": "pass" if passed else "fail",
+                      "detail": "OK" if passed else result["status"] if result["status"] != "success" else "Wrong answer"})
+        elapsed += result["execution_time"]
+    passed = sum(test["status"] == "pass" for test in tests)
+    return {"project_slug": project_slug, "score": passed * 100 // len(tests), "tests": tests,
+            "passed": passed, "total": len(tests), "execution_time": elapsed,
+            "logs": f"Executed {len(tests)} test cases; {passed} passed."}
 
-$ norminette {project_slug}/
-OK
-
-$ make -j4
-cc -Wall -Wextra -Werror ...
-
-$ valgrind --leak-check=full ./test_runner
-=={rng.randint(1000,9999)}== 0 bytes lost
-
-Result: {passed}/{len(template)} | Score: {score}/100
-Security: All checks passed, no forbidden patterns detected
-"""
-    return {
-        "project_slug": project_slug,
-        "score": score,
-        "tests": tests,
-        "passed": passed,
-        "total": len(template),
-        "logs": logs,
-        "execution_time": rng.uniform(0.8, 4.2)
-    }
 
 def run_code_in_sandbox(code: str, language: str, test_input: str = "") -> dict:
-    """Polyglot runner with security checks"""
-    start = time.time()
-    
-    # Validate input sizes
-    if len(code) > MAX_FILE_SIZE:
-        return {
-            "status": "error",
-            "output": "",
-            "error": f"Code too large: {len(code)} bytes, max {MAX_FILE_SIZE}",
-            "execution_time": 0
-        }
-    
-    if len(test_input) > 10240:  # 10KB max input
-        return {
-            "status": "error",
-            "output": "",
-            "error": "Test input too large (max 10KB)",
-            "execution_time": 0
-        }
-    
-    # Security checks with regex
-    patterns = FORBIDDEN_PATTERNS.get(language, [])
-    for pattern in patterns:
-        try:
-            if re.search(pattern, code, re.IGNORECASE):
-                logger.warning(f"Security violation: pattern '{pattern}' in {language} code")
-                return {
-                    "status": "security_violation",
-                    "output": "",
-                    "error": f"Forbidden pattern detected: {pattern} - blocked by security policy (network/process access denied)",
-                    "execution_time": 0
-                }
-        except re.error:
-            continue
-    
-    # Additional checks for all languages
-    if "\x00" in code:
-        return {
-            "status": "security_violation",
-            "output": "",
-            "error": "Null byte detected - security violation",
-            "execution_time": 0
-        }
-    
-    # Simulate execution with timeout
-    time.sleep(0.1)
-    elapsed = time.time() - start
-    
-    if elapsed > settings.JUDGE_TIMEOUT:
-        return {
-            "status": "timeout",
-            "output": "",
-            "error": f"Execution timeout after {settings.JUDGE_TIMEOUT}s",
-            "execution_time": elapsed
-        }
-    
-    return {
-        "status": "success",
-        "output": f"Execution simulated for {language}\nInput: {test_input[:100]}\nOutput: Hello ROOT 404\nSecurity: Sandboxed, no network, limited resources",
-        "error": "",
-        "execution_time": elapsed
-    }
+    from fastapi import HTTPException
+    extensions = {"c": "c", "cpp": "cpp", "c++": "cpp", "python": "py", "py": "py", "javascript": "js", "js": "js"}
+    if language not in extensions or len(code.encode()) > MAX_FILE_SIZE or len(test_input) > 10240:
+        raise HTTPException(status_code=400, detail="Invalid code execution request")
+    return _execute({f"main.{extensions[language]}": code}, language, test_input)
 
 class JudgeService:
     @staticmethod
@@ -403,29 +189,29 @@ class JudgeService:
         """AST-like similarity check with sanitization"""
         if not code1 or not code2:
             return 0.0
-        
+
         # Limit size to prevent DoS
         if len(code1) > 100000 or len(code2) > 100000:
             return 0.0
-        
+
         def normalize(c):
             # Remove comments and whitespace for comparison
             c = re.sub(r'//.*?\n|/\*.*?\*/', '', c, flags=re.DOTALL)
             c = re.sub(r'#.*?\n', '\n', c)
             return ''.join(c.lower().split())
-        
+
         try:
             n1, n2 = normalize(code1), normalize(code2)
             if not n1 or not n2:
                 return 0.0
-            
+
             def bigrams(s):
                 return set(s[i:i+2] for i in range(len(s)-1)) if len(s) > 1 else set()
-            
+
             b1, b2 = bigrams(n1), bigrams(n2)
             if not b1 or not b2:
                 return 0.0
-            
+
             intersection = len(b1 & b2)
             union = len(b1 | b2)
             return (intersection / union * 100) if union else 0.0
@@ -437,7 +223,7 @@ class JudgeService:
     def analyze_complexity(code: str) -> dict:
         if len(code) > 100000:
             return {"error": "Code too large for analysis"}
-        
+
         try:
             lines = code.split('\n')
             return {

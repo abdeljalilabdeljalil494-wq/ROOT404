@@ -28,10 +28,10 @@ export default defineConfig({
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          monaco: ['@monaco-editor/react'],
-          icons: ['lucide-react'],
+        manualChunks(id) {
+          if (id.includes('node_modules/lucide-react/')) return 'icons'
+          if (id.includes('node_modules/@monaco-editor/')) return 'monaco'
+          if (/node_modules\/(react|react-dom|react-router)(\/|-)/.test(id)) return 'react'
         },
       },
     },

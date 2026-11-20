@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 import time
 import logging
 import os
+import threading
+import asyncio
 
 from app.core.config import settings, get_safe_database_url
 from app.core.database import init_db
@@ -17,6 +19,8 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+from app.core.logging import install_secret_filters
+install_secret_filters()
 logger = logging.getLogger(__name__)
 
 # Security: Don't log sensitive data
@@ -34,6 +38,9 @@ async def lifespan(app: FastAPI):
         init_db()
         logger.info("Database initialized successfully")
         
+        if not settings.SEED_DEMO_DATA:
+            yield
+            return
         # Seed default data
         from app.core.database import SessionLocal
         from app.services.coalition import CoalitionService
@@ -151,28 +158,44 @@ async def security_headers_middleware(request: Request, call_next):
     return response
 
 # Request size limiting and logging middleware
+_body_slots = threading.BoundedSemaphore(8)
 @app.middleware("http")
 async def request_middleware(request: Request, call_next):
     start_time = time.time()
     
-    # Limit request size (10MB max)
+    # Enforce actual streamed bytes, not only a caller-supplied Content-Length.
     content_length = request.headers.get("content-length")
-    if content_length:
+    if content_length and (not content_length.isdecimal() or int(content_length) > 10 * 1024 * 1024):
+        return JSONResponse(status_code=413 if content_length.isdecimal() else 400,
+                            content={"detail": "Invalid or oversized request body"})
+    body_slot = False
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if not _body_slots.acquire(blocking=False):
+            return JSONResponse(status_code=429, content={"detail": "Upload capacity reached"}, headers={"Retry-After":"2"})
+        body_slot = True
         try:
-            size = int(content_length)
-            if size > 10 * 1024 * 1024:  # 10MB
-                return JSONResponse(
-                    status_code=413,
-                    content={"detail": "Request too large. Max 10MB."}
-                )
-        except ValueError:
-            pass
-    
-    # Get client IP for logging
-    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or \
-                request.headers.get("X-Real-IP", "") or \
-                (request.client.host if request.client else "unknown")
-    
+            body = bytearray()
+            async with asyncio.timeout(10):
+                async for chunk in request.stream():
+                    if len(body) + len(chunk) > 10 * 1024 * 1024:
+                        _body_slots.release()
+                        body_slot = False
+                        return JSONResponse(status_code=413, content={"detail":"Request body exceeds10MiB"})
+                    body.extend(chunk)
+            request._body = bytes(body)
+            del body
+        except TimeoutError:
+            _body_slots.release()
+            body_slot = False
+            return JSONResponse(status_code=408, content={"detail":"Request body timed out"})
+        except BaseException:
+            _body_slots.release()
+            raise
+
+    # Uvicorn applies explicitly trusted proxy processing; never trust raw headers
+    # a second time for security/audit identity.
+    client_ip = request.client.host if request.client else "unknown"
+
     try:
         response = await call_next(request)
     except Exception as e:
@@ -182,6 +205,10 @@ async def request_middleware(request: Request, call_next):
             content={"detail": "Internal server error"}
         )
     
+    finally:
+        if body_slot:
+            _body_slots.release()
+
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = f"{process_time:.3f}"
     response.headers["X-Request-ID"] = os.urandom(8).hex()
@@ -212,7 +239,8 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": detail, "status": exc.status_code}
+        content={"detail": detail, "status": exc.status_code},
+        headers=exc.headers
     )
 
 @app.exception_handler(RequestValidationError)
@@ -273,6 +301,17 @@ def health():
         "environment": settings.ENVIRONMENT,
         "timestamp": time.time()
     }
+
+@app.get("/ready", tags=["Root"])
+def ready():
+    from app.core.database import check_db_health
+    from app.core.cache import check_redis_health
+    database_ok = check_db_health()
+    redis_ok = check_redis_health()
+    healthy = database_ok and redis_ok is not False
+    return JSONResponse(status_code=200 if healthy else 503,
+        content={"status": "ready" if healthy else "unavailable", "database": "ok" if database_ok else "unavailable",
+                 "redis": "not_configured" if redis_ok is None else "ok" if redis_ok else "unavailable"})
 
 # For running with uvicorn directly
 if __name__ == "__main__":

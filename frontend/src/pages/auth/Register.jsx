@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { authService } from '../../services/api'
 import AuthLayout from './AuthLayout'
 import Button from '../../components/ui/Button'
 import Icon from '../../components/ui/Icon'
@@ -14,25 +15,32 @@ const LEVELS = [
 
 export default function Register() {
   const navigate = useNavigate()
+  const [error, setError] = useState('')
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', campus: 'Tunis', level: 'some', terms: false })
+  const [form, setForm] = useState({ name: '', username: '', email: '', campus: 'Tunis', level: 'some', terms: false })
 
   useEffect(() => { document.title = 'Postuler — ROOT 404' }, [])
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
-  const next = (e) => {
+  const next = async (e) => {
     e.preventDefault()
     if (step < 3) return setStep(step + 1)
     setLoading(true)
-    setTimeout(() => navigate('/dashboard'), 1000)
+    setError('')
+    try {
+      const response = await authService.register({ username: form.username, email: form.email, display_name: form.name, full_name: form.name, campus: form.campus })
+      navigate('/login', { state: { email: form.email, otpSent: true, devOtp: import.meta.env.DEV ? response.dev_otp : null } })
+    } catch (err) {
+      setError(typeof err.response?.data?.detail === 'string' ? err.response.data.detail : 'Inscription impossible. Vérifie les champs ou réessaie.')
+    } finally { setLoading(false) }
   }
 
   return (
     <AuthLayout
-      title="Rejoins la prochaine Piscine"
-      subtitle="Quatre semaines intensives, aucun prérequis, aucun frais. Il ne reste que la volonté d'apprendre."
+      title="Créer un compte bêta"
+      subtitle="Accès aux fonctionnalités disponibles de la bêta privée. Aucune admission à une session Piscine n’est garantie."
       footer={
         <>
           Déjà inscrit ?{' '}
@@ -48,9 +56,14 @@ export default function Register() {
         <ProgressBar value={(step / 3) * 100} height={4} />
       </div>
 
+      {error && <p role="alert" className="mb-4 text-danger">{error}</p>}
       <form onSubmit={next} className="space-y-4">
         {step === 1 && (
           <>
+            <div>
+              <label htmlFor="username">Nom d’utilisateur</label>
+              <input id="username" required minLength={3} maxLength={30} pattern="[A-Za-z][A-Za-z0-9_-]*" value={form.username} onChange={(e) => set('username', e.target.value)} className="input h-11" />
+            </div>
             <div>
               <label htmlFor="name" className="mb-1.5 block text-[12.5px] font-semibold text-ink">Nom complet</label>
               <div className="relative">
@@ -112,7 +125,7 @@ export default function Register() {
             ))}
             <p className="flex items-start gap-2 pt-2 text-[11.5px] leading-relaxed text-ink-faint">
               <Icon name="Info" size={13} className="mt-0.5 shrink-0 text-info" />
-              Cette réponse n'influence pas ton admission — elle calibre seulement tes premiers exercices.
+              Cette réponse n'influence pas ton admission — elle est indicative ; aucun exercice personnalisé n’est encore attribué.
             </p>
           </div>
         )}
@@ -127,7 +140,7 @@ export default function Register() {
                   ['E-mail', form.email || '—'],
                   ['Campus', form.campus],
                   ['Niveau', LEVELS.find((l) => l.k === form.level)?.l],
-                  ['Session', 'Piscine — octobre 2026'],
+                  ['Accès', 'Bêta privée — fonctionnalités disponibles uniquement'],
                 ].map(([k, v]) => (
                   <div key={k} className="flex justify-between gap-4">
                     <dt className="text-ink-dim">{k}</dt>

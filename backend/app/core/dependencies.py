@@ -5,9 +5,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from .database import get_db
 from .security import decode_token
 from app.models.user import User
-import time
-import threading
-from collections import defaultdict
 import logging
 from typing import Optional
 
@@ -15,47 +12,14 @@ logger = logging.getLogger(__name__)
 
 security = HTTPBearer(auto_error=False)
 
-# Thread-safe rate limiter with sliding window
-class RateLimiter:
-    def __init__(self):
-        self._store = defaultdict(list)
-        self._lock = threading.RLock()
-    
-    def is_allowed(self, key: str, max_requests: int, window: int) -> tuple[bool, int]:
-        """Returns (allowed, retry_after_seconds)"""
-        now = time.time()
-        with self._lock:
-            # Clean old entries
-            self._store[key] = [t for t in self._store[key] if now - t < window]
-            
-            if len(self._store[key]) >= max_requests:
-                # Calculate retry after
-                oldest = min(self._store[key]) if self._store[key] else now
-                retry_after = int(window - (now - oldest)) + 1
-                return False, retry_after
-            
-            self._store[key].append(now)
-            return True, 0
-    
-    def clear(self):
-        with self._lock:
-            self._store.clear()
+from .rate_limit import RateLimiter
 
-# Global rate limiter
+# State is shared in SQL across worker instances, not process-local.
 _rate_limiter = RateLimiter()
 
 def get_client_ip(request: Request) -> str:
     """Get client IP with proxy support"""
-    # Check for forwarded headers (if behind proxy)
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        # Take first IP in list
-        return forwarded.split(",")[0].strip()
-    
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-    
+    # Uvicorn handles forwarded headers only from configured trusted proxy IPs.
     return request.client.host if request.client else "unknown"
 
 def rate_limit(
@@ -66,9 +30,12 @@ def rate_limit(
 ):
     """Rate limiting dependency"""
     client_ip = get_client_ip(request)
-    key = f"{key_prefix}:{client_ip}:{request.url.path}"
+    key = f"{key_prefix}:{client_ip}"
     
-    allowed, retry_after = _rate_limiter.is_allowed(key, max_requests, window)
+    try:
+        allowed, retry_after = _rate_limiter.is_allowed(key, max_requests, window)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Rate limit storage unavailable")
     
     if not allowed:
         logger.warning(f"Rate limit exceeded for {client_ip} on {request.url.path}")
@@ -114,7 +81,7 @@ def get_current_user(
         )
     
     # Validate token format
-    if not credentials.credentials or len(credentials.credentials) < 20:
+    if not credentials.credentials or not 20 <= len(credentials.credentials) <= 8192:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token format",
@@ -129,6 +96,9 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"}
         )
     
+    from app.models.auth_state import RevokedToken
+    if not payload.get("jti") or db.get(RevokedToken, payload["jti"]):
+        raise HTTPException(status_code=401, detail="Session revoked")
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(
@@ -160,6 +130,12 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"}
         )
     
+    if payload.get("sv", 0) != user.session_version:
+        raise HTTPException(status_code=401, detail="Session revoked")
+
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="Email verification required")
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -174,23 +150,9 @@ def get_current_user_optional(
 ) -> Optional[User]:
     if not credentials:
         return None
-    
-    payload = decode_token(credentials.credentials)
-    if not payload:
-        return None
-    
-    user_id = payload.get("sub")
-    if not user_id:
-        return None
-    
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user and user.is_active:
-            return user
-    except SQLAlchemyError:
-        pass
-    
-    return None
+    # An explicitly supplied invalid/revoked token is not anonymous authentication.
+    return get_current_user(credentials, db)
+
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
     if not current_user.is_admin:
@@ -212,3 +174,20 @@ def require_mentor(current_user: User = Depends(get_current_user)) -> User:
 # For testing - clear rate limiter
 def _clear_rate_limiter():
     _rate_limiter.clear()
+
+
+def require_demo_mode():
+    from .config import settings
+    if settings.ENVIRONMENT != "development" or not settings.ENABLE_DEMO_FEATURES:
+        raise HTTPException(status_code=503, detail="This prototype workflow is not implemented for real use")
+
+
+def ai_rate_limit(current_user: User = Depends(get_current_user)):
+    """Per-account persisted hourly budget shared by ask/review aliases."""
+    from .config import settings
+    try:
+        allowed, retry = _rate_limiter.is_allowed(f"ai-user:{current_user.id}", settings.AI_REQUESTS_PER_HOUR, 3600)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Rate limit storage unavailable")
+    if not allowed:
+        raise HTTPException(status_code=429, detail="AI request budget exhausted", headers={"Retry-After": str(retry)})

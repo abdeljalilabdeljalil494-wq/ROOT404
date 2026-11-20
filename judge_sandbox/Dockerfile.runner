@@ -1,90 +1,13 @@
-FROM ubuntu:22.04
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-
-# Install minimal compilers and tools - no unnecessary packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    gcc \
-    g++ \
-    clang \
-    make \
-    valgrind \
-    python3 \
-    python3-pip \
-    nodejs \
-    npm \
-    ca-certificates \
+# No supervisor, credentials, expected answers or result writer in this image.
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ python3 nodejs ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
-
-# Security: Remove setuid binaries and dangerous tools
-RUN find / -type f -perm -4000 -delete 2>/dev/null || true && \
-    rm -rf /usr/bin/wget /usr/bin/curl 2>/dev/null || true && \
-    rm -rf /bin/su /usr/bin/su 2>/dev/null || true
-
-# Security: create unprivileged user with no shell history and limited home
-RUN useradd -m -s /bin/false -u 1000 judge && \
-    mkdir -p /workspace /app && \
-    chown -R judge:judge /workspace /app && \
-    chmod 700 /workspace /app && \
-    # No sudo
-    rm -rf /etc/sudoers.d && \
-    # Empty /home/judge except workspace
-    rm -rf /home/judge/.bash_history 2>/dev/null || true
-
-# Copy runners with correct permissions
-WORKDIR /app
-COPY --chown=judge:judge runner.py .
-COPY --chown=judge:judge runners/ ./runners/
-RUN chmod 500 runner.py && chmod 500 runners/*.py && \
-    chmod 700 /app
-
-# Security: Make filesystem mostly read-only for judge user
-# /workspace is the only writable area
-RUN chown root:root /app && \
-    chown judge:judge /workspace
-
-# Switch to unprivileged user
-USER judge
+    && (getent passwd 1000 >/dev/null || useradd -m -s /bin/false -u 1000 judge) \
+    && mkdir -p /workspace /opt/judge \
+    && chown 1000:1000 /workspace
+COPY launch.py /opt/judge/launch.py
+RUN chown -R root:root /opt/judge && chmod -R go-w /opt/judge
+USER 1000:1000
 WORKDIR /workspace
-
-# Security: Set resource limits via ulimit in entrypoint script
-# Note: Docker run flags will enforce stricter limits (memory, cpu, pids)
-# This is defense in depth
-
-# Hardened entrypoint
-COPY --chown=judge:judge <<'EOF' /app/entrypoint.sh
-#!/bin/bash
-set -euo pipefail
-
-# Resource limits
-ulimit -t 30          # CPU time 30s
-ulimit -v 524288      # Virtual memory 512MB
-ulimit -n 64          # Open files
-ulimit -u 64          # Processes
-ulimit -f 10240       # File size 10MB
-ulimit -m 524288      # Memory
-
-# No core dumps
-ulimit -c 0
-
-# Clear environment
-export PATH="/usr/bin:/bin"
-export HOME="/workspace"
-cd /workspace
-
-# Execute runner with no new privileges
-exec python3 /app/runner.py "$@"
-EOF
-
-RUN chmod 500 /app/entrypoint.sh
-
-# Security: No network, read-only rootfs will be set at docker run time
-# Labels for security scanning
-LABEL security.no-new-privileges="true" \
-      security.read-only-rootfs="true" \
-      security.cap-drop="ALL"
-
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/python3", "-I", "/opt/judge/launch.py", "run"]

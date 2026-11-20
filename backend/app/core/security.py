@@ -1,106 +1,19 @@
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from jose import JWTError, ExpiredSignatureError, jwt
+import jwt
+from jwt import InvalidTokenError as JWTError, ExpiredSignatureError
 from passlib.context import CryptContext
 import secrets
 import string
 import hashlib
 import hmac
-import time
 import threading
-from collections import defaultdict
 from .config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Thread-safe OTP store
-class ThreadSafeOTPStore:
-    def __init__(self):
-        self._store: Dict[str, Dict[str, Any]] = {}
-        self._lock = threading.RLock()
-        self._rate_limit: Dict[str, list] = defaultdict(list)  # email -> list of timestamps
-        self._rate_lock = threading.RLock()
-    
-    def _clean_expired(self):
-        now = datetime.utcnow()
-        expired = [k for k, v in self._store.items() if now > v["expires"]]
-        for k in expired:
-            del self._store[k]
-    
-    def _check_rate_limit(self, email: str) -> bool:
-        """Check if email is rate limited for OTP requests"""
-        key = email.lower()
-        now = time.time()
-        hour_ago = now - 3600
-        
-        with self._rate_lock:
-            # Clean old entries
-            self._rate_limit[key] = [t for t in self._rate_limit[key] if t > hour_ago]
-            
-            if len(self._rate_limit[key]) >= settings.OTP_RATE_LIMIT_PER_HOUR:
-                return False
-            
-            self._rate_limit[key].append(now)
-            return True
-    
-    def store(self, email: str, otp: str):
-        key = email.lower()
-        with self._lock:
-            self._clean_expired()
-            self._store[key] = {
-                "otp": hashlib.sha256(otp.encode()).hexdigest(),
-                "expires": datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES),
-                "attempts": 0,
-                "created_at": datetime.utcnow()
-            }
-    
-    def verify(self, email: str, code: str) -> bool:
-        key = email.lower()
-        with self._lock:
-            self._clean_expired()
-            
-            if key not in self._store:
-                # Constant time to prevent timing attacks
-                hashlib.sha256(b"dummy").hexdigest()
-                return False
-            
-            entry = self._store[key]
-            
-            if datetime.utcnow() > entry["expires"]:
-                del self._store[key]
-                return False
-            
-            if entry["attempts"] >= settings.OTP_MAX_ATTEMPTS:
-                del self._store[key]
-                logger.warning(f"OTP max attempts exceeded for {email}")
-                return False
-            
-            entry["attempts"] += 1
-            
-            # Constant-time comparison to prevent timing attacks
-            hashed_input = hashlib.sha256(code.encode()).hexdigest()
-            if hmac.compare_digest(hashed_input, entry["otp"]):
-                del self._store[key]
-                return True
-            
-            return False
-    
-    def can_request_otp(self, email: str) -> tuple[bool, str]:
-        if not self._check_rate_limit(email):
-            return False, f"Rate limit exceeded. Max {settings.OTP_RATE_LIMIT_PER_HOUR} OTP requests per hour."
-        return True, ""
-    
-    def clear(self):
-        with self._lock:
-            self._store.clear()
-        with self._rate_lock:
-            self._rate_limit.clear()
-
-# Global thread-safe store
-_otp_store = ThreadSafeOTPStore()
 
 # For development: last OTPs with thread safety
 class ThreadSafeLastOTP:
@@ -157,6 +70,7 @@ def decode_token(token: str) -> Optional[dict]:
             algorithms=[settings.ALGORITHM],
             issuer=settings.PROJECT_NAME,
             options={
+                "require": ["sub", "exp", "iat", "nbf", "iss", "jti"],
                 "verify_aud": False,
                 "verify_iss": True,
                 "verify_exp": True,
@@ -178,32 +92,86 @@ def generate_otp(length: int = 6) -> str:
     # Use secrets for cryptographically secure random
     return ''.join(secrets.choice(string.digits) for _ in range(length))
 
+def _otp_digest(email: str, code: str) -> str:
+    return hmac.new(settings.SECRET_KEY.encode(), f"{email.lower()}:{code}".encode(), hashlib.sha256).hexdigest()
+
+
 def store_otp(email: str, otp: str):
-    _otp_store.store(email, otp)
+    from .database import SessionLocal
+    from app.models.auth_state import OTPChallenge
+    with SessionLocal() as db:
+        db.merge(OTPChallenge(email=email.lower(), digest=_otp_digest(email, otp),
+                              expires_at=datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES), attempts=0))
+        db.commit()
+
 
 def verify_otp(email: str, code: str) -> bool:
-    return _otp_store.verify(email, code)
+    from sqlalchemy import update, delete
+    from .database import SessionLocal
+    from app.models.auth_state import OTPChallenge
+    email = email.lower()
+    with SessionLocal() as db:
+        # Atomic increment serializes concurrent attempts on PostgreSQL and SQLite.
+        claimed = db.execute(update(OTPChallenge).where(
+            OTPChallenge.email == email, OTPChallenge.expires_at > datetime.utcnow(),
+            OTPChallenge.attempts < settings.OTP_MAX_ATTEMPTS
+        ).values(attempts=OTPChallenge.attempts + 1))
+        if claimed.rowcount != 1:
+            db.rollback()
+            return False
+        entry = db.get(OTPChallenge, email)
+        valid = hmac.compare_digest(entry.digest, _otp_digest(email, code))
+        if valid:
+            db.execute(delete(OTPChallenge).where(OTPChallenge.email == email))
+        db.commit()
+        return valid
+
 
 def can_request_otp(email: str) -> tuple[bool, str]:
-    return _otp_store.can_request_otp(email)
+    from sqlalchemy import update, delete
+    from sqlalchemy.exc import IntegrityError
+    from .database import SessionLocal
+    from app.models.auth_state import AuthThrottle
+    key = hashlib.sha256(email.lower().encode()).hexdigest()
+    with SessionLocal() as db:
+        db.execute(delete(AuthThrottle).where(AuthThrottle.key == key, AuthThrottle.expires_at <= datetime.utcnow()))
+        db.commit()
+        try:
+            db.add(AuthThrottle(key=key, count=0, expires_at=datetime.utcnow() + timedelta(hours=1)))
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+        result = db.execute(update(AuthThrottle).where(AuthThrottle.key == key,
+            AuthThrottle.count < settings.OTP_RATE_LIMIT_PER_HOUR).values(count=AuthThrottle.count + 1))
+        db.commit()
+        return result.rowcount == 1, "Rate limit exceeded for OTP requests"
+
 
 def generate_and_store_otp(email: str) -> str:
+    from app.services.email import send_otp
     can_request, msg = can_request_otp(email)
     if not can_request:
         raise ValueError(msg)
-    
     otp = generate_otp(settings.OTP_LENGTH)
     store_otp(email, otp)
-    # Only store last OTP in development
-    if settings.ENVIRONMENT != "production":
+    try:
+        send_otp(email, otp)
+    except Exception:
+        # A code whose delivery failed must not remain usable.
+        from .database import SessionLocal
+        from app.models.auth_state import OTPChallenge
+        with SessionLocal() as db:
+            db.query(OTPChallenge).filter_by(email=email.lower(), digest=_otp_digest(email, otp)).delete()
+            db.commit()
+        raise
+    if settings.ENVIRONMENT == "development" and settings.ENABLE_DEV_OTP:
         _last_otps.set(email, otp)
     return otp
 
+
 def get_last_otp(email: str) -> Optional[str]:
-    # Only available in non-production
-    if settings.ENVIRONMENT == "production":
-        return None
-    return _last_otps.get(email)
+    return _last_otps.get(email) if settings.ENVIRONMENT == "development" and settings.ENABLE_DEV_OTP else None
+
 
 def sanitize_input(text: str, max_length: int = 1000) -> str:
     """Sanitize user input to prevent XSS"""
@@ -272,5 +240,12 @@ def validate_email_format(email: str) -> tuple[bool, str]:
 
 # Cleanup for testing
 def _clear_stores():
-    _otp_store.clear()
+    if settings.ENVIRONMENT != "development":
+        raise RuntimeError("Test reset is only available in development")
+    from .database import SessionLocal
+    from app.models.auth_state import OTPChallenge, AuthThrottle, RevokedToken
+    with SessionLocal() as db:
+        for model in (OTPChallenge, AuthThrottle, RevokedToken):
+            db.query(model).delete()
+        db.commit()
     _last_otps.clear()

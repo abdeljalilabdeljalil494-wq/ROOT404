@@ -2,7 +2,7 @@
 Coalition System — Houses, scoring, wars
 """
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, update
 from app.models.coalition import Coalition, CoalitionMember, CoalitionWar
 from app.models.user import User
 from app.models.project import UserProjectProgress
@@ -11,22 +11,13 @@ from datetime import datetime, timedelta
 class CoalitionService:
     @staticmethod
     def get_leaderboard(db: Session):
-        coalitions = db.query(Coalition).order_by(Coalition.points.desc()).all()
-        result = []
-        for idx, c in enumerate(coalitions, 1):
-            result.append({
-                "id": c.id,
-                "rank": idx,
-                "name": c.name,
-                "color": c.color,
-                "points": c.points,
-                "members": c.members_count,
-                "wins": c.wins,
-                "trend": c.trend,
-                "motto": c.motto
-            })
-        return result
-    
+        # Derive totals from actual active accounts; never trust demo counters.
+        rows=db.query(Coalition,func.coalesce(func.sum(User.xp),0),func.count(User.id)).outerjoin(
+            User,(User.coalition_id==Coalition.id)&(User.is_active==True)).group_by(Coalition.id).all()
+        rows.sort(key=lambda row:(-row[1],row[0].name))
+        return [{'id':c.id,'rank':rank,'name':c.name,'color':c.color,'points':int(points),
+                 'members':members,'motto':c.motto} for rank,(c,points,members) in enumerate(rows,1)]
+
     @staticmethod
     def assign_user_to_coalition(user: User, db: Session, coalition_id: str = None):
         """
@@ -48,13 +39,14 @@ class CoalitionService:
         if existing:
             return existing
         
-        member = CoalitionMember(
-            coalition_id=coalition.id,
-            user_id=user.id
-        )
-        coalition.members_count += 1
-        user.coalition_id = coalition.id
-        
+        # Single-winner assignment on both PostgreSQL and SQLite; clients cannot
+        # repeatedly switch coalitions to transfer/duplicate contribution.
+        claimed=db.execute(update(User).where(User.id==user.id,User.coalition_id.is_(None)).values(coalition_id=coalition.id)).rowcount
+        if claimed!=1:
+            db.rollback()
+            return db.query(CoalitionMember).filter_by(user_id=user.id).first()
+        member = CoalitionMember(coalition_id=coalition.id,user_id=user.id)
+        db.execute(update(Coalition).where(Coalition.id==coalition.id).values(members_count=Coalition.members_count+1))
         db.add(member)
         db.commit()
         return member
@@ -118,6 +110,7 @@ class CoalitionService:
         for data in defaults:
             existing = db.query(Coalition).filter(Coalition.name == data["name"]).first()
             if not existing:
+                data.update(points=0, members_count=0, wins=0, trend="0")
                 c = Coalition(**data)
                 db.add(c)
         db.commit()

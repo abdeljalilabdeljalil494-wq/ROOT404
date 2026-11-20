@@ -1,3 +1,15 @@
+# Always isolate tests from developer/production data, before app imports.
+import os
+import tempfile
+import atexit
+_test_db = tempfile.NamedTemporaryFile(prefix="root404-tests-", suffix=".db", delete=False)
+_test_db.close()
+os.environ["DATABASE_URL"] = "sqlite:///" + _test_db.name
+os.environ["ENVIRONMENT"] = "development"
+os.environ["EMAIL_PROVIDER"] = "development"
+os.environ["ENABLE_DEV_OTP"] = "true"
+atexit.register(lambda: os.path.exists(_test_db.name) and os.unlink(_test_db.name))
+
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))

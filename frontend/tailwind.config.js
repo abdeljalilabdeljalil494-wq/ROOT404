@@ -35,8 +35,8 @@ export default {
         ink: {
           DEFAULT: '#E8EDF2',
           soft: '#9AA7B4',
-          dim: '#6B7885',
-          faint: '#495562',
+          dim: '#96A3B0',
+          faint: '#8998A7',
         },
         ok: '#2ECC71',
         warn: '#F5B942',

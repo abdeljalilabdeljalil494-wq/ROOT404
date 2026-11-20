@@ -63,6 +63,7 @@ class RoomMessage(Base):
     room_id = Column(String(32), ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(String(32), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     
+    removed_at = Column(DateTime, nullable=True)
     content = Column(Text, nullable=False)
     type = Column(String(20), default="text", nullable=False)
     

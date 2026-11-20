@@ -1,0 +1,7 @@
+services:
+  frontend:
+    ports:
+      - "${ROOT404_HTTPS_BIND:-0.0.0.0}:443:443"
+    volumes:
+      - ./deploy/nginx-tls.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${ROOT404_TLS_DIR:?Set private TLS directory outside checkout}:/etc/root404/tls:ro

@@ -52,3 +52,10 @@ logs/
 
 # Arena
 .arena/
+
+# Local verification tooling
+.cache/
+.pytest_cache/
+
+# Private operator verification evidence
+reports/

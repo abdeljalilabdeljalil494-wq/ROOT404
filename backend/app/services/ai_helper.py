@@ -1,5 +1,6 @@
 """
-AI Mentor 2.0 — Socratic Hints, not solutions
+Legacy scripted teaching templates and explicitly labeled lexical heuristics.
+Production ask/review routes use services/ai_provider.py, not these templates.
 Levels:
 1. Hint initial
 2. Question socratique
@@ -137,52 +138,14 @@ def get_socratic_hint(message: str, level: int = 2, project_slug: str = None, co
         }
 
 def analyze_code_review(code: str, project_slug: str = None) -> dict:
+    """Legacy callable kept compatible, now delegates to the real provider boundary.
+
+    No numerical correctness/memory grade can be inferred by counting source words.
+    API routes additionally persist interactions and enforce account budgets.
     """
-    AI Code Review - automated analysis
-    """
-    metrics = []
-    notes = []
-    
-    loc = len(code.split('\n'))
-    # Correctness heuristic
-    correctness = 85 + random.randint(-10, 10)
-    if "TODO" in code or "FIXME" in code:
-        correctness -= 15
-    metrics.append({"label": "Correctness", "value": max(0, min(100, correctness))})
-    
-    # Memory safety
-    malloc_count = code.count("malloc")
-    free_count = code.count("free")
-    memory = 90 if malloc_count == free_count and malloc_count > 0 else (70 if malloc_count > 0 else 88)
-    if malloc_count > free_count:
-        notes.append({"tone": "warn", "text": f"Tu alloues {malloc_count} fois mais ne libères que {free_count} fois — fuite potentielle."})
-    metrics.append({"label": "Memory Safety", "value": memory})
-    
-    # Code quality
-    long_funcs = code.count("\n\n")  # rough
-    quality = 80
-    if loc > 500:
-        quality -= 10
-        notes.append({"tone": "warn", "text": "La fonction `parse_and_execute` est trop complexe (complexité cyclomatique 17)."})
-        notes.append({"tone": "info", "text": "Concept suggéré : Separation of Concerns — sépare le parsing de l'exécution."})
-    metrics.append({"label": "Code Quality", "value": quality})
-    
-    # Complexity
-    complexity = max(40, 100 - (code.count("if") + code.count("for") + code.count("while"))*2)
-    metrics.append({"label": "Complexity", "value": complexity})
-    
-    # Readability
-    has_comments = "//" in code or "/*" in code
-    readability = 90 if has_comments else 75
-    if not has_comments:
-        notes.append({"tone": "info", "text": "Ajoute des commentaires pour les parties non triviales — ton futur toi te remerciera."})
-    metrics.append({"label": "Readability", "value": readability})
-    
-    return {
-        "metrics": metrics,
-        "notes": notes,
-        "suggestions": ["Découper les grosses fonctions", "Vérifier tous les malloc", "Tester les cas limites"]
-    }
+    from app.services.ai_provider import ask_provider
+    return ask_provider('Review this code without inventing scores or executed tests.', 3,
+                        {'project_slug': project_slug, 'code': code})
 
 class AIMentorService:
     @staticmethod

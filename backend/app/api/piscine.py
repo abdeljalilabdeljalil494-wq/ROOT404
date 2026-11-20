@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_admin
 from app.models.user import User
 from app.models import PiscineDay, UserPiscineProgress
 from datetime import datetime
@@ -11,11 +11,6 @@ router = APIRouter(prefix="/piscine", tags=["Piscine"])
 @router.get("/days")
 def get_days(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     days = db.query(PiscineDay).order_by(PiscineDay.day_number.asc()).all()
-    
-    if not days:
-        # Seed if empty
-        seed_days(db)
-        days = db.query(PiscineDay).order_by(PiscineDay.day_number.asc()).all()
     
     # Get user progress
     progress_map = {}
@@ -31,8 +26,8 @@ def get_days(current_user: User = Depends(get_current_user), db: Session = Depen
             "day": day.day_number,
             "title": day.title,
             "topic": day.topic,
-            "status": prog.status if prog else ("done" if day.day_number < 12 else "today" if day.day_number == 12 else "locked"),
-            "score": prog.score if prog else (60 + (day.day_number * 37) % 41 if day.day_number < 12 else None),
+            "status": prog.status if prog else ("available" if day.day_number == 1 else "locked"),
+            "score": prog.score if prog else None,
             "isRush": day.is_rush,
             "exercises": day.exercises
         })
@@ -47,18 +42,12 @@ def get_stats(current_user: User = Depends(get_current_user), db: Session = Depe
         UserPiscineProgress.status == "done"
     ).count()
     
-    # If no progress, mock
-    if done == 0:
-        done = 11
-    
     return [
-        {"label": "Jour actuel", "value": "12 / 28", "icon": "CalendarDays"},
-        {"label": "Exercices validés", "value": str(done * 7 + 7), "icon": "CheckCircle2"},
-        {"label": "Consistency Score", "value": "91%", "icon": "Activity"},
-        {"label": "Rang Piscine", "value": "#17", "icon": "Trophy"},
+        {"label": "Jours du programme", "value": str(days), "icon": "CalendarDays"},
+        {"label": "Jours validés", "value": str(done), "icon": "CheckCircle2"},
     ]
 
-@router.post("/seed")
+@router.post("/seed", dependencies=[Depends(require_admin)])
 def seed_piscine(db: Session = Depends(get_db)):
     seed_days(db)
     return {"ok": True}

@@ -1,13 +1,18 @@
+import OAuthButtons from '../../components/OAuthButtons'
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { authService } from '../../services/api'
 import AuthLayout from './AuthLayout'
 import Button from '../../components/ui/Button'
 import Icon from '../../components/ui/Icon'
 
 export default function Login() {
   const navigate = useNavigate()
-  const [step, setStep] = useState('email')
-  const [email, setEmail] = useState('')
+  const location = useLocation()
+  const [devOtp, setDevOtp] = useState(location.state?.devOtp || null)
+  const [error, setError] = useState('')
+  const [step, setStep] = useState(location.state?.otpSent ? 'otp' : 'email')
+  const [email, setEmail] = useState(location.state?.email || '')
   const [code, setCode] = useState(['', '', '', '', '', ''])
   const [loading, setLoading] = useState(false)
   const [seconds, setSeconds] = useState(60)
@@ -22,11 +27,18 @@ export default function Login() {
     return () => clearInterval(id)
   }, [step])
 
-  const sendOtp = (e) => {
+  const sendOtp = async (e) => {
     e.preventDefault()
-    if (!email) return
     setLoading(true)
-    setTimeout(() => { setLoading(false); setStep('otp'); setSeconds(60) }, 800)
+    setError('')
+    try {
+      const response = await authService.requestOtp(email)
+      setDevOtp(import.meta.env.DEV ? response.dev_otp : null)
+      setStep('otp')
+      setSeconds(60)
+    } catch (err) {
+      setError(typeof err.response?.data?.detail === 'string' ? err.response.data.detail : 'Impossible d’envoyer le code. Réessayez.')
+    } finally { setLoading(false) }
   }
 
   const onDigit = (i, v) => {
@@ -39,13 +51,17 @@ export default function Login() {
     if (e.key === 'Backspace' && !code[i] && i > 0) refs.current[i - 1]?.focus()
   }
 
-  const verify = (e) => {
+  const verify = async (e) => {
     e.preventDefault()
     setLoading(true)
-    setTimeout(() => {
-      localStorage.setItem('root404_token', 'mock.jwt.token')
+    setError('')
+    try {
+      const result = await authService.verifyOtp(email, code.join(''))
+      localStorage.setItem('root404_token', result.access_token)
       navigate('/dashboard')
-    }, 900)
+    } catch (err) {
+      setError(typeof err.response?.data?.detail === 'string' ? err.response.data.detail : 'Code invalide ou service indisponible.')
+    } finally { setLoading(false) }
   }
 
   return (
@@ -65,6 +81,8 @@ export default function Login() {
         </>
       }
     >
+      {import.meta.env.DEV && devOtp && <p role="note" className="mb-4 text-warn">Développement uniquement — code local : {devOtp}</p>}
+      {error && <p role="alert" className="mb-4 text-danger">{error}</p>}
       {step === 'email' ? (
         <form onSubmit={sendOtp} className="space-y-4">
           <div>
@@ -96,8 +114,8 @@ export default function Login() {
           </div>
 
           <div className="grid gap-2.5 sm:grid-cols-2">
-            <Button variant="outline" size="lg" icon="Github">GitHub</Button>
-            <Button variant="outline" size="lg" icon="MessageCircle">Discord</Button>
+            <Button disabled title="OAuth GitHub non implémenté" variant="outline" size="lg" icon="Github">GitHub</Button>
+            <Button disabled title="OAuth Discord non implémenté" variant="outline" size="lg" icon="MessageCircle">Discord</Button>
           </div>
 
           <p className="flex items-start gap-2 pt-2 text-[11.5px] leading-relaxed text-ink-faint">
@@ -137,7 +155,7 @@ export default function Login() {
             <button
               type="button"
               disabled={seconds > 0}
-              onClick={() => setSeconds(60)}
+              onClick={sendOtp}
               className="font-medium text-brand-500 disabled:text-ink-faint"
             >
               {seconds > 0 ? `Renvoyer dans ${seconds}s` : 'Renvoyer le code'}
@@ -145,6 +163,7 @@ export default function Login() {
           </div>
         </form>
       )}
-    </AuthLayout>
+    <OAuthButtons />
+      </AuthLayout>
   )
 }

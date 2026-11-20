@@ -10,20 +10,20 @@ import uuid
 
 class RoomService:
     @staticmethod
-    def create_room(host_id: str, name: str, room_type: str, project: str = None, capacity: int = 10, tags: List[str] = None, db: Session = None) -> Room:
+    def create_room(host_id: str, name: str, room_type: str, project: str = None, capacity: int = 10, tags: List[str] = None, db: Session = None, is_private: bool = False) -> Room:
         room = Room(
             name=name,
             type=room_type,
             project=project,
             host_id=host_id,
             capacity=capacity,
+            is_private=is_private,
             tags=tags or [],
             is_live=True if room_type in ["live", "competition"] else False
         )
         db.add(room)
-        db.commit()
-        db.refresh(room)
-        
+        db.flush()
+
         # Add host as member
         member = RoomMember(room_id=room.id, user_id=host_id, role="host")
         db.add(member)
@@ -33,23 +33,22 @@ class RoomService:
     
     @staticmethod
     def join_room(room_id: str, user_id: str, db: Session) -> tuple:
-        room = db.query(Room).filter(Room.id == room_id).first()
+        room = db.query(Room).filter(Room.id == room_id).with_for_update().first()
         if not room:
             return None, "Room not found"
         
-        # Check capacity
-        current = db.query(RoomMember).filter(RoomMember.room_id == room_id).count()
-        if current >= room.capacity:
-            return None, "Room full"
-        
-        # Check already member
-        existing = db.query(RoomMember).filter(
-            RoomMember.room_id == room_id,
-            RoomMember.user_id == user_id
-        ).first()
+        if room.is_private and room.host_id != user_id:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Private room requires an invitation; invitations are not implemented")
+        # Idempotent re-join must work even when the room has reached capacity.
+        existing = db.query(RoomMember).filter_by(room_id=room_id,user_id=user_id).first()
         if existing:
             return room, "Already member"
-        
+        current = db.query(RoomMember).filter(RoomMember.room_id == room_id).count()
+        if current >= room.capacity:
+            from fastapi import HTTPException
+            raise HTTPException(409, "Room full")
+
         member = RoomMember(room_id=room_id, user_id=user_id, role="member")
         db.add(member)
         db.commit()
@@ -80,7 +79,7 @@ class RoomService:
                     "displayName": user.display_name,
                     "avatar": user.avatar_url,
                     "role": m.role,
-                    "status": "online",  # Would be real presence in production
+                    "status": "unknown",
                     "joined_at": m.joined_at.isoformat()
                 })
         return result
@@ -100,9 +99,10 @@ class RoomService:
     
     @staticmethod
     def get_messages(room_id: str, limit: int = 50, db: Session = None) -> List[dict]:
-        messages = db.query(RoomMessage).filter(
+        messages = db.query(RoomMessage).filter(RoomMessage.removed_at.is_(None),
             RoomMessage.room_id == room_id
-        ).order_by(RoomMessage.created_at.asc()).limit(limit).all()
+        ).order_by(RoomMessage.created_at.desc(), RoomMessage.id.desc()).limit(limit).all()
+        messages.reverse()
         
         result = []
         for msg in messages:
@@ -119,7 +119,7 @@ class RoomService:
     
     @staticmethod
     def list_rooms(room_type: str = None, db: Session = None, limit: int = 100) -> List[dict]:
-        query = db.query(Room)
+        query = db.query(Room).filter(Room.is_private == False)
         if room_type:
             query = query.filter(Room.type == room_type)
         rooms = query.order_by(Room.created_at.desc()).limit(limit).all()

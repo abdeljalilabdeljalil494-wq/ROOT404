@@ -1,18 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import usePageHeader from '../hooks/usePageHeader'
 import Icon from '../components/ui/Icon'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import Avatar from '../components/ui/Avatar'
 import ProgressBar from '../components/ui/ProgressBar'
-import { aiConversation, aiLevels, currentUser, skillGraph } from '../data/mock'
-
-const CANNED = [
-  "Bonne question. Reformule-moi d'abord le problème avec tes propres mots : qu'attends-tu exactement en sortie, et qu'obtiens-tu à la place ?",
-  "Je ne vais pas écrire ce code à ta place. Mais dis-moi : que se passe-t-il si tu traces la valeur juste avant l'appel ? Que devrais-tu voir ?",
-  "Le concept sous-jacent ici s'appelle l'ownership de la mémoire. Qui alloue ? Qui libère ? Tant que cette réponse n'est pas nette, le bug reviendra.",
-  "Essaie de réduire le cas au minimum reproductible : trois lignes qui plantent, sans le reste. Tu trouveras souvent la réponse en le faisant.",
-]
+import { aiService } from '../services/api'
+import { useCurrentUser } from '../components/RequireAuth'
+import useResource from '../hooks/useResource'
+import ResourceState from '../components/ui/ResourceState'
 
 const SUGGESTIONS = [
   { icon: 'Bug', text: 'Pourquoi mon programme segfault ?' },
@@ -22,6 +18,7 @@ const SUGGESTIONS = [
 ]
 
 function Bubble({ m }) {
+  const currentUser = useCurrentUser()
   if (m.role === 'user') {
     return (
       <div className="flex flex-row-reverse gap-3">
@@ -78,7 +75,13 @@ function Bubble({ m }) {
 export default function Mentor() {
   usePageHeader({ title: 'Assistant IA' })
 
-  const [messages, setMessages] = useState(aiConversation)
+  const resource = useResource(useCallback(async () => {
+    const [history, levels, gaps] = await Promise.all([aiService.history(), aiService.levels(), aiService.gaps()])
+    return { history, levels, gaps: gaps.gaps }
+  }, []))
+  const [messages, setMessages] = useState([])
+  const [error, setError] = useState('')
+  useEffect(() => { if (resource.data) setMessages(resource.data.history) }, [resource.data])
   const [draft, setDraft] = useState('')
   const [typing, setTyping] = useState(false)
   const [level, setLevel] = useState(2)
@@ -89,21 +92,23 @@ export default function Mentor() {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [messages, typing])
 
-  const ask = (text) => {
-    if (!text.trim()) return
-    setMessages((m) => [...m, { role: 'user', text: text.trim() }])
-    setDraft('')
+  const ask = async (text) => {
+    if (!text.trim() || typing || resource.loading || resource.error) return
     setTyping(true)
-    setTimeout(() => {
-      setTyping(false)
-      setMessages((m) => [...m, { role: 'ai', text: CANNED[m.length % CANNED.length] }])
-    }, 1100)
+    setError('')
+    try {
+      const response = await aiService.ask(text.trim(), level)
+      setMessages(messages => [...messages, { role: 'user', text: text.trim() }, response])
+      setDraft('')
+    } catch (failure) {
+      setDraft(text)
+      setError(typeof failure.response?.data?.detail === 'string' ? failure.response.data.detail : 'Mentor indisponible. Aucun conseil fictif créé.')
+    } finally { setTyping(false) }
   }
 
-  const gaps = skillGraph
-    .flatMap((g) => g.skills.map((s) => ({ ...s, group: g.group, color: g.color })))
-    .sort((a, b) => a.value - b.value)
-    .slice(0, 4)
+  if (resource.loading || resource.error) return <ResourceState resource={resource} />
+  const aiLevels = resource.data.levels
+  const gaps = resource.data.gaps.slice(0, 4).map(gap => ({ ...gap, color: '#F8851F' }))
 
   return (
     <div className="container-page py-6">
@@ -116,13 +121,13 @@ export default function Mentor() {
               <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-ok ring-2 ring-root-800" />
             </span>
             <div className="min-w-0">
-              <h1 className="text-[14px] font-bold text-ink">AI Mentor 2.0</h1>
+              <h1 className="text-[14px] font-bold text-ink">ROOT404 Mentor</h1>
               <p className="text-[11.5px] text-ink-dim">
-                Guide socratique · contexte : <span className="font-mono text-ink-soft">minishell</span>
+                Guide socratique · conversation enregistrée
               </p>
             </div>
             <Badge tone="brand" className="ml-auto hidden sm:inline-flex">Niveau d'aide {level}/5</Badge>
-            <button className="grid h-8 w-8 place-items-center rounded-md text-ink-dim hover:bg-white/[0.06] hover:text-ink" aria-label="Nouvelle conversation">
+            <button disabled title="Conversations séparées non implémentées" className="grid h-8 w-8 place-items-center rounded-md text-ink-dim hover:bg-white/[0.06] hover:text-ink" aria-label="Nouvelle conversation">
               <Icon name="RotateCcw" size={15} />
             </button>
           </header>
@@ -131,11 +136,13 @@ export default function Mentor() {
             <div className="rounded-lg border border-warn/25 bg-warn/[0.06] px-4 py-3">
               <p className="flex gap-2.5 text-[12px] leading-relaxed text-ink-soft">
                 <Icon name="Info" size={14} className="mt-0.5 shrink-0 text-warn" />
-                L'assistant ne donne jamais la solution finale d'un projet. Il pose des questions,
-                explique des concepts et signale les schémas de copier-coller au système anti-triche.
+                Tes questions sont transmises au fournisseur IA configuré et les échanges réussis sont enregistrés.
+                Ne partage aucun secret. Les conseils peuvent être incorrects : aucun test n’est exécuté par le mentor.
               </p>
             </div>
 
+            {error && <p role="alert" className="text-danger">{error}</p>}
+            {messages.length === 0 && <p className="text-ink-dim">Aucun échange enregistré. Pose une question pour commencer.</p>}
             {messages.map((m, i) => <Bubble key={i} m={m} />)}
 
             {typing && (
@@ -162,6 +169,7 @@ export default function Mentor() {
               {SUGGESTIONS.map((s) => (
                 <button
                   key={s.text}
+                  disabled={typing}
                   onClick={() => ask(s.text)}
                   className="flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-root-850 px-3 py-1.5 text-[11.5px] text-ink-dim transition-colors hover:border-brand-500/40 hover:text-brand-500"
                 >
@@ -176,6 +184,8 @@ export default function Mentor() {
               <div className="relative flex-1">
                 <textarea
                   rows={1}
+                  aria-label="Question au mentor"
+                  maxLength={5000}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
@@ -184,11 +194,11 @@ export default function Mentor() {
                   placeholder="Pose ta question… (Entrée pour envoyer)"
                   className="input h-auto max-h-32 resize-none py-2.5 pr-10"
                 />
-                <button type="button" aria-label="Joindre du code" className="absolute right-2.5 top-2.5 text-ink-faint hover:text-ink">
+                <button disabled title="Pièces jointes non disponibles" type="button" aria-label="Joindre du code" className="absolute right-2.5 top-2.5 text-ink-faint hover:text-ink">
                   <Icon name="Code2" size={15} />
                 </button>
               </div>
-              <Button type="submit" className="h-10 w-10 shrink-0 !px-0" aria-label="Envoyer">
+              <Button type="submit" className="h-10 w-10 shrink-0 !px-0" aria-label="Envoyer" loading={typing} disabled={!draft.trim()}>
                 <Icon name="Send" size={15} />
               </Button>
             </form>
@@ -200,8 +210,7 @@ export default function Mentor() {
           <section className="card p-5">
             <h2 className="text-[13px] font-bold text-ink">Niveaux d'assistance</h2>
             <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
-              Choisis jusqu'où l'assistant peut aller. Plus le niveau est haut, plus l'aide est
-              explicite — et plus l'AI Dependency de ton Integrity Score augmente.
+              Choisis le degré de détail demandé au fournisseur. Ce réglage ne constitue ni une note ni une preuve de compétence.
             </p>
             <ul className="mt-4 space-y-1.5">
               {aiLevels.map((l) => (
@@ -245,23 +254,14 @@ export default function Mentor() {
                 </li>
               ))}
             </ul>
-            <Button variant="outline" size="sm" full className="mt-4" iconRight="ArrowRight">
+            <Button disabled title="Évaluation des micro-challenges non implémentée" variant="outline" size="sm" full className="mt-4" iconRight="ArrowRight">
               Micro-challenges suggérés
             </Button>
           </section>
 
           <section className="card p-5">
-            <h2 className="flex items-center gap-2 text-[13px] font-bold text-ink">
-              <Icon name="ShieldCheck" size={15} className="text-ok" /> AI Dependency
-            </h2>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="font-mono text-[26px] font-extrabold text-ok">Low</span>
-              <span className="text-[11.5px] text-ink-dim">12 requêtes / 30 j.</span>
-            </div>
-            <ProgressBar value={18} color="#2ECC71" height={5} className="mt-3" />
-            <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
-              Une dépendance faible renforce ton Integrity Score et ta crédibilité en peer review.
-            </p>
+            <h2 className="text-[13px] font-bold text-ink">Conseils, pas évaluations</h2>
+            <p className="mt-3 text-xs text-ink-dim">Le mentor ne valide pas un projet et ne garantit ni la correction ni la sécurité du code. Une limite serveur par compte protège l’utilisation du fournisseur.</p>
           </section>
         </aside>
       </div>

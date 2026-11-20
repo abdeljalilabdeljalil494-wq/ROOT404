@@ -1,25 +1,25 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, judge_rate_limit, ai_rate_limit
 from app.models.user import User
-from app.services.ai_helper import AIMentorService, get_socratic_hint, analyze_code_review, detect_topic
+from app.services.ai_helper import AIMentorService, detect_topic
 from app.services.integrity import IntegrityService
 
 router = APIRouter(prefix="/ai", tags=["AI Mentor"])
 
 class AskRequest(BaseModel):
-    message: str
-    level: int = 2
-    project_slug: Optional[str] = None
-    code: Optional[str] = None
+    message: str = Field(min_length=1, max_length=5000)
+    level: int = Field(2, ge=1, le=5)
+    project_slug: Optional[str] = Field(None, max_length=100)
+    code: Optional[str] = Field(None, max_length=100000)
 
 class ReviewRequest(BaseModel):
-    code: str
-    project_slug: Optional[str] = None
-    language: str = "c"
+    code: str = Field(min_length=1, max_length=100000)
+    project_slug: Optional[str] = Field(None, max_length=100)
+    language: str = Field("c", max_length=20)
 
 class HistoryResponse(BaseModel):
     role: str
@@ -28,56 +28,27 @@ class HistoryResponse(BaseModel):
     footer: Optional[str] = None
 
 @router.get("/history")
-def get_history(current_user: User = Depends(get_current_user)):
-    # Mock history - in production would be from DB
-    return [
-        {
-            "role": "ai",
-            "text": "Salut 👋 J'ai analysé ta dernière soumission de `minishell`. Je ne vais pas te donner la solution — mais je peux t'aider à la trouver. Par quoi veux-tu commencer ?",
-            "chips": ["Comprendre mon erreur", "Expliquer un concept", "Me donner un indice"]
-        },
-        {
-            "role": "user",
-            "text": "Mon shell segfault quand je fais `cat | cat | ls`. Je ne comprends pas pourquoi."
-        },
-        {
-            "role": "ai",
-            "text": "Bonne observation — ce cas enchaîne trois processus. Avant de plonger dans le code, réponds-moi :",
-            "list": [
-                "Combien de pipes crées-tu pour 3 commandes ?",
-                "Que deviennent les descripteurs dans le processus parent après le fork ?",
-                "Est-ce que chaque enfant ferme bien les extrémités qu'il n'utilise pas ?"
-            ],
-            "footer": "Un segfault ici vient souvent d'un `close()` manquant ou d'un tableau de pipes mal indexé."
-        }
-    ]
-
-@router.post("/ask")
-def ask_ai(payload: AskRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Detect cheating
-    if payload.code:
-        cheating = AIMentorService.detect_cheating(payload.code, [])
-        if cheating["is_suspicious"]:
-            IntegrityService.log_action(
-                current_user.id, "ai_cheating_flag", "ai", None,
-                {"flags": cheating["flags"], "question": payload.message[:100]}, db=db
-            )
-    
-    context = {"project_slug": payload.project_slug}
-    response = AIMentorService.ask(payload.message, payload.level, context)
-    
-    # Log AI interaction for integrity score
-    IntegrityService.log_action(
-        current_user.id, "ai_ask", "ai", None,
-        {"level": payload.level, "topic": detect_topic(payload.message), "project": payload.project_slug}, db=db
-    )
-    
-    return response
-
-@router.post("/review")
-def ai_review(payload: ReviewRequest, current_user: User = Depends(get_current_user)):
-    result = analyze_code_review(payload.code, payload.project_slug)
+def get_history(limit: int = Query(50, ge=1, le=100), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.models.mentor import MentorInteraction
+    rows = db.query(MentorInteraction).filter_by(user_id=current_user.id).order_by(
+        MentorInteraction.created_at.desc(), MentorInteraction.id.desc()).limit(limit).all()
+    result = []
+    for interaction in reversed(rows):
+        result.extend([{'role': 'user', 'text': interaction.message, 'interaction_id': interaction.id},
+                       {**interaction.response, 'interaction_id': interaction.id}])
     return result
+
+@router.post("/ask", dependencies=[Depends(judge_rate_limit), Depends(ai_rate_limit)])
+def ask_ai(payload: AskRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.ai_provider import ask_provider, save_interaction
+    response = ask_provider(payload.message, payload.level, {'project_slug': payload.project_slug, 'code': payload.code})
+    # No automatic integrity penalty from superficial paste/comment heuristics.
+    return save_interaction(db, current_user.id, 'ask', payload.message, response)
+
+@router.post("/review", dependencies=[Depends(judge_rate_limit), Depends(ai_rate_limit)])
+def ai_review(payload: ReviewRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.ai_provider import review_code
+    return review_code(db, current_user.id, payload.code, payload.language, payload.project_slug)
 
 @router.get("/levels")
 def get_levels():
@@ -99,4 +70,4 @@ def get_knowledge_gaps(current_user: User = Depends(get_current_user)):
 @router.post("/detect-cheating")
 def detect_cheating(payload: ReviewRequest, current_user: User = Depends(get_current_user)):
     result = AIMentorService.detect_cheating(payload.code, [])
-    return result
+    return {**result, "method": "lexical_heuristic", "proof_of_cheating": False}

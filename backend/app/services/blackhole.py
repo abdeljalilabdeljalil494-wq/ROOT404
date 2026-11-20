@@ -48,6 +48,8 @@ class BlackHoleService:
     
     @staticmethod
     def update_user_blackhole(user: User, db: Session):
+        # Serialize with activity/XP updates and discard stale identity-map state.
+        user = db.query(User).filter(User.id == user.id).with_for_update().populate_existing().one()
         days_left = BlackHoleService.calculate_days_left(user, db)
         user.blackhole_days_left = days_left
         user.blackhole_warning = BlackHoleService.check_warning_zone(user, days_left)

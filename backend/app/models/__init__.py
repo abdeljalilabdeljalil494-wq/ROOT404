@@ -1,3 +1,6 @@
+from .beta import MissionClaim, ModerationReport
+from .oauth import OAuthAttempt, OAuthIdentity
+from .notification import Notification
 from app.core.database import Base
 from .user import User
 from .project import Project, UserProjectProgress

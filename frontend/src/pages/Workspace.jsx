@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import Editor from '@monaco-editor/react'
+import '../services/editor'
 import Logo from '../components/Logo'
 import Icon from '../components/ui/Icon'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import Avatar from '../components/ui/Avatar'
 import ProgressBar from '../components/ui/ProgressBar'
-import { fileTree, sampleCode, terminalLines, moulinetteTests, currentUser, aiCodeReview } from '../data/mock'
+import { aiService, judgeService, projectService } from '../services/api'
+import { useCurrentUser } from '../components/RequireAuth'
+const STARTERS = {
+  c: '#include <stdio.h>\nint main(void) { puts("Hello ROOT404"); return 0; }\n',
+  cpp: '#include <iostream>\nint main() { std::cout << "Hello ROOT404\\n"; }\n',
+  python: 'print("Hello ROOT404")\n',
+  javascript: 'console.log("Hello ROOT404");\n',
+}
+const EXTENSIONS = { c: 'c', cpp: 'cpp', python: 'py', javascript: 'js' }
+
 
 /* ------------------------------------------------------------------ */
 /* Monaco theme matching the ROOT 404 palette                          */
@@ -92,10 +102,19 @@ function TreeNode({ node, depth = 0, activeFile, onOpen }) {
 export default function Workspace() {
   const { slug = 'minishell' } = useParams()
 
-  const [tabs, setTabs] = useState([{ name: 'minishell.c', lang: 'c' }])
-  const [activeFile, setActiveFile] = useState('minishell.c')
-  const [code, setCode] = useState(sampleCode)
-  const [lines, setLines] = useState(terminalLines)
+  const currentUser = useCurrentUser()
+  const [language, setLanguage] = useState('c')
+  const [review, setReview] = useState(null)
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const [reviewError, setReviewError] = useState('')
+  const drafts = useRef({})
+  const fileTree = [{ name: `main.${EXTENSIONS[language]}`, type: 'file', lang: language }]
+  const [evaluation, setEvaluation] = useState(null)
+  const moulinetteTests = evaluation?.tests || []
+  const [tabs, setTabs] = useState([{ name: 'main.c', lang: 'c' }])
+  const [activeFile, setActiveFile] = useState('main.c')
+  const [code, setCode] = useState('#include <stdio.h>\n\nint main(void) {\n    puts("Hello ROOT404");\n    return 0;\n}\n')
+  const [lines, setLines] = useState([{ t: 'info', v: 'Aucune exécution effectuée.' }])
   const [running, setRunning] = useState(false)
   const [moulinetteOpen, setMoulinetteOpen] = useState(true)
   const [explorerOpen, setExplorerOpen] = useState(false)
@@ -126,21 +145,31 @@ export default function Workspace() {
     })
   }
 
-  const run = () => {
+  const run = async (submit = false) => {
     setRunning(true)
+    setMoulinetteOpen(true)
     setPanelTab('moulinette')
-    setLines([{ t: 'cmd', v: '$ make -j4 && ./minishell' }])
-    const seq = terminalLines.slice(1)
-    seq.forEach((l, i) =>
-      setTimeout(() => {
-        setLines((prev) => [...prev, l])
-        if (i === seq.length - 1) setRunning(false)
-      }, 220 * (i + 1)),
-    )
+    setLines([{ t: 'cmd', v: submit ? 'Soumission au juge…' : 'Exécution…' }])
+    try {
+      const result = submit
+        ? await projectService.submit(slug, { [`main.${EXTENSIONS[language]}`]: code }, language)
+        : await judgeService.run({ code, language })
+      if (submit) setEvaluation(result)
+      setLines([result.status, result.output, result.error, result.logs].filter(Boolean).map(v => ({ t: 'info', v })))
+    } catch (error) {
+      setLines([{ t: 'error', v: typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'Exécution indisponible. Aucun résultat créé.' }])
+    } finally { setRunning(false) }
+  }
+
+  const reviewCode = async () => {
+    setReviewBusy(true); setReviewError(''); setReview(null)
+    try { setReview(await aiService.review(code, language, slug)) }
+    catch { setReviewError('Analyse IA indisponible. Aucun avis généré.') }
+    finally { setReviewBusy(false) }
   }
 
   const passed = moulinetteTests.filter((t) => t.status === 'pass').length
-  const score = Math.round((passed / moulinetteTests.length) * 100)
+  const score = evaluation?.score ?? 0
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-root-900">
@@ -162,11 +191,12 @@ export default function Workspace() {
         </button>
 
         <div className="ml-auto flex items-center gap-1">
-          <Badge tone="ok" dot className="mr-2 hidden sm:inline-flex">Sandbox actif</Badge>
+          <Badge tone="neutral" className="mr-2 hidden sm:inline-flex">Exécution distante sous réserve de disponibilité</Badge>
           {['Search', 'GitBranch', 'History', 'Bell'].map((i) => (
             <button
               key={i}
               aria-label={i}
+              disabled title="Fonction non disponible"
               className="grid h-8 w-8 place-items-center rounded-md text-ink-soft transition-colors hover:bg-white/[0.06] hover:text-ink"
             >
               <Icon name={i} size={15} />
@@ -192,7 +222,7 @@ export default function Workspace() {
             </span>
             <div className="flex gap-0.5">
               {['FilePlus2', 'FolderPlus', 'RefreshCw'].map((i) => (
-                <button key={i} aria-label={i} className="grid h-6 w-6 place-items-center rounded text-ink-faint hover:bg-white/[0.06] hover:text-ink">
+                <button key={i} aria-label={i} disabled title="Fonction non disponible" className="grid h-6 w-6 place-items-center rounded text-ink-faint hover:bg-white/[0.06] hover:text-ink">
                   <Icon name={i} size={12} />
                 </button>
               ))}
@@ -209,12 +239,12 @@ export default function Workspace() {
                 Conteneur
               </p>
               <p className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-ink-soft">
-                <Icon name="Container" size={12} className="text-info" /> ubuntu:22.04
+                <Icon name="Container" size={12} className="text-info" /> Métriques indisponibles
               </p>
               <div className="mt-2 space-y-1.5">
                 {[
-                  { l: 'CPU', v: 12 },
-                  { l: 'RAM', v: 48 },
+                  { l: 'CPU', v: 0 },
+                  { l: 'RAM', v: 0 },
                 ].map((m) => (
                   <div key={m.l} className="flex items-center gap-2">
                     <span className="w-7 text-[9.5px] text-ink-faint">{m.l}</span>
@@ -253,16 +283,26 @@ export default function Workspace() {
                   </button>
                 )
               })}
-              <button className="grid h-full w-9 shrink-0 place-items-center text-ink-faint hover:text-ink" aria-label="Nouvel onglet">
+              <button disabled title="Éditeur mono-fichier" className="grid h-full w-9 shrink-0 place-items-center text-ink-faint hover:text-ink" aria-label="Nouvel onglet">
                 <Icon name="Plus" size={14} />
               </button>
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              <Button size="sm" variant="outline" icon="Play" onClick={run} loading={running}>
+              <select aria-label="Langage de programmation" value={language} disabled={running} className="input w-auto" onChange={(event) => {
+                const next = event.target.value
+                drafts.current[language] = code
+                setLanguage(next)
+                setCode(drafts.current[next] ?? STARTERS[next])
+                const name = `main.${EXTENSIONS[next]}`
+                setTabs([{ name, lang: next }]); setActiveFile(name); setEvaluation(null)
+              }}>
+                <option value="c">C</option><option value="cpp">C++</option><option value="python">Python</option><option value="javascript">JavaScript</option>
+              </select>
+              <Button aria-label="Exécuter le code" size="sm" variant="outline" icon="Play" onClick={() => run(false)} loading={running}>
                 <span className="hidden sm:inline">Exécuter</span>
               </Button>
-              <Button size="sm" icon="Cpu" onClick={() => { setPanelTab('moulinette'); setMoulinetteOpen(true) }}>
+              <Button aria-label="Soumettre au Judge" size="sm" icon="Cpu" onClick={() => run(true)} loading={running}>
                 <span className="hidden sm:inline">Passer la Moulinette</span>
                 <span className="sm:hidden">Moulinette</span>
               </Button>
@@ -273,7 +313,7 @@ export default function Workspace() {
           <div className="min-h-0 flex-1 bg-[#0A0F15]">
             <Editor
               height="100%"
-              language="c"
+              language={language === 'cpp' ? 'cpp' : language}
               value={code}
               onChange={(v) => setCode(v ?? '')}
               theme="root404"
@@ -310,7 +350,7 @@ export default function Workspace() {
           {/* Status bar */}
           <div className="flex h-[26px] shrink-0 items-center gap-4 border-t border-line bg-root-950 px-3 font-mono text-[10.5px] text-ink-dim">
             <span className="flex items-center gap-1.5 text-ok">
-              <Icon name="CircleCheck" size={11} /> Norminette OK
+              <Icon name="CircleCheck" size={11} /> Norme non vérifiée
             </span>
             <span className="flex items-center gap-1.5">
               <Icon name="GitBranch" size={11} /> main
@@ -319,7 +359,7 @@ export default function Workspace() {
             <span className="hidden md:inline">Tabs: 4</span>
             <span className="hidden md:inline">UTF-8</span>
             <span className="hidden lg:inline">LF</span>
-            <span className="text-brand-500">C</span>
+            <span className="text-brand-500">{language}</span>
           </div>
         </div>
 
@@ -383,7 +423,7 @@ export default function Workspace() {
                     score >= 80 ? 'text-ok' : 'text-warn'
                   }`}
                 >
-                  {score}/100
+                  {evaluation ? `${score}/100` : 'Non évalué'}
                 </span>
               </div>
 
@@ -418,42 +458,16 @@ export default function Workspace() {
                         </li>
                       ))}
                     </ul>
-                    <Button size="sm" full className="mt-3.5" iconRight="ArrowRight">
+                    <Button to="/peer-review" size="sm" full className="mt-3.5" iconRight="ArrowRight">
                       Envoyer en Peer Review
                     </Button>
                   </>
                 ) : (
                   <>
-                    <ul className="space-y-2.5">
-                      {aiCodeReview.metrics.map((m) => (
-                        <li key={m.label}>
-                          <ProgressBar
-                            value={m.value}
-                            showLabel
-                            label={m.label}
-                            height={5}
-                            color={m.value >= 85 ? '#2ECC71' : m.value >= 70 ? '#F8851F' : '#E5484D'}
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="mt-4 space-y-2.5">
-                      {aiCodeReview.notes.map((n, i) => (
-                        <div
-                          key={i}
-                          className={`rounded-lg border p-3 text-[11.5px] leading-relaxed text-ink-soft ${
-                            n.tone === 'warn' ? 'border-warn/25 bg-warn/[0.06]' : 'border-info/25 bg-info/[0.06]'
-                          }`}
-                        >
-                          <Icon
-                            name={n.tone === 'warn' ? 'AlertTriangle' : 'Lightbulb'}
-                            size={13}
-                            className={`mr-1.5 inline ${n.tone === 'warn' ? 'text-warn' : 'text-info'}`}
-                          />
-                          {n.text}
-                        </div>
-                      ))}
-                    </div>
+                    <Button onClick={reviewCode} loading={reviewBusy} disabled={!code.trim()} size="sm">Analyser le code avec l’IA</Button>
+                    <p className="mt-2 text-xs text-ink-dim">Envoie le fichier au fournisseur configuré. Son avis n’est pas une exécution ni une note.</p>
+                    {reviewError && <p role="alert">{reviewError}</p>}
+                    {review && <p className="mt-3 whitespace-pre-wrap break-words text-sm">{review.text}</p>}
                     <p className="mt-4 text-[10.5px] leading-relaxed text-ink-faint">
                       L'AI Review ne remplace pas le Peer Review et ne valide jamais un projet seule.
                     </p>

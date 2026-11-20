@@ -1,32 +1,47 @@
-from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import joinedload
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, rate_limit
 from app.models.user import User
 from app.models.correction import Correction, CorrectionSlot
 from app.models.submission import Submission
 from app.models.project import Project
 from app.services.correction import CorrectionService
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import update
 
 router = APIRouter(prefix="/peer-review", tags=["Peer Review"])
+
+def review_rate_limit(request: Request, user: User = Depends(get_current_user)):
+    return rate_limit(request, max_requests=30, window=60, key_prefix='review:' + user.id)
+
 
 class ScheduleRequest(BaseModel):
     submission_id: str
     preferred_time: Optional[datetime] = None
 
 class ReviewRequest(BaseModel):
-    score: int
-    comment: Optional[str] = None
-    checklist: Optional[List[dict]] = None
-    author_rating: Optional[int] = None
+    score: int = Field(ge=0, le=100)
+    comment: Optional[str] = Field(None, max_length=5000)
+    checklist: Optional[List[dict]] = Field(None, max_length=100)
+    author_rating: Optional[int] = Field(None, ge=1, le=5)
 
 class SlotCreate(BaseModel):
     start_time: datetime
     end_time: datetime
-    project_id: Optional[str] = None
+    project_id: Optional[str] = Field(None, max_length=32)
+
+    @model_validator(mode='after')
+    def valid_interval(self):
+        for name in ('start_time','end_time'):
+            value=getattr(self,name)
+            if value.tzinfo: setattr(self,name,value.astimezone(timezone.utc).replace(tzinfo=None))
+        if self.start_time <= datetime.utcnow() or not timedelta(minutes=5) <= self.end_time-self.start_time <= timedelta(hours=2):
+            raise ValueError('Future slots must last5minutes to2hours')
+        return self
 
 @router.get("/")
 def list_corrections(
@@ -34,22 +49,26 @@ def list_corrections(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # One joined SELECT per role, independent of correction count.
+    query = db.query(Correction).options(
+        joinedload(Correction.submission).joinedload(Submission.project),
+        joinedload(Correction.author), joinedload(Correction.corrector),
+    )
     if role == "corrector" or role == "all":
-        as_corrector = db.query(Correction).filter(Correction.corrector_id == current_user.id).all()
+        as_corrector = query.filter(Correction.corrector_id == current_user.id).all()
     else:
         as_corrector = []
     
     if role == "author" or role == "all":
-        as_author = db.query(Correction).filter(Correction.author_id == current_user.id).all()
+        as_author = query.filter(Correction.author_id == current_user.id).all()
     else:
         as_author = []
     
     def format_correction(c):
-        submission = db.query(Submission).filter(Submission.id == c.submission_id).first()
-        project = db.query(Project).filter(Project.id == submission.project_id).first() if submission else None
-        author = db.query(User).filter(User.id == c.author_id).first()
-        corrector = db.query(User).filter(User.id == c.corrector_id).first() if c.corrector_id else None
-        
+        submission = c.submission
+        project = submission.project if submission else None
+        author = c.author
+        corrector = c.corrector
         return {
             "id": c.id,
             "project": project.slug if project else "unknown",
@@ -71,7 +90,7 @@ def list_corrections(
         "total": len(as_corrector) + len(as_author)
     }
 
-@router.post("/request")
+@router.post("/request", dependencies=[Depends(review_rate_limit)])
 def request_correction(payload: ScheduleRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     submission = db.query(Submission).filter(Submission.id == payload.submission_id).first()
     if not submission:
@@ -112,39 +131,50 @@ def get_correction(correction_id: str, current_user: User = Depends(get_current_
         "tests": submission.tests if submission else []
     }
 
-@router.post("/{correction_id}/review")
+@router.post("/{correction_id}/review", dependencies=[Depends(review_rate_limit)])
 def submit_review(correction_id: str, payload: ReviewRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    correction = db.query(Correction).filter(Correction.id == correction_id).first()
+    correction = db.query(Correction).filter(Correction.id == correction_id).with_for_update().first()
     if not correction:
         raise HTTPException(status_code=404, detail="Correction non trouvée")
     if correction.corrector_id != current_user.id:
         raise HTTPException(status_code=403, detail="Seul le correcteur peut noter")
     
-    correction.score = payload.score
-    correction.comment = payload.comment
-    if payload.checklist:
-        correction.checklist = payload.checklist
-    correction.status = "completed"
-    
-    # Award correction points
-    corrector = db.query(User).filter(User.id == current_user.id).first()
-    if corrector:
-        points = CorrectionService.calculate_correction_points(correction)
-        corrector.correction_points += points
-    
-    # Update submission if score high enough, mark as validated
-    submission = db.query(Submission).filter(Submission.id == correction.submission_id).first()
-    
+    if correction.status == "completed":
+        raise HTTPException(status_code=409, detail="Review already completed")
+    changed = db.execute(update(Correction).where(Correction.id == correction_id,
+        Correction.corrector_id == current_user.id, Correction.status != 'completed').values(
+            score=payload.score, comment=payload.comment,
+            checklist=payload.checklist if payload.checklist is not None else correction.checklist,
+            status='completed'))
+    if changed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, 'Review already completed')
+    db.refresh(correction)
+    points = CorrectionService.calculate_correction_points(correction)
+    db.execute(update(User).where(User.id == current_user.id).values(
+        correction_points=User.correction_points + points))
+    from app.models.notification import Notification
+    db.add(Notification(user_id=correction.author_id, kind='review_completed',
+        text='Votre correction est terminée : ' + str(payload.score) + '/100.', path='/peer-review'))
+    # Human feedback does not automatically validate code or award project XP.
     db.commit()
-    
+
     return {
         "ok": True,
         "score": payload.score,
         "correction_points_earned": CorrectionService.calculate_correction_points(correction)
     }
 
-@router.post("/slots")
+@router.post("/slots", dependencies=[Depends(review_rate_limit)])
 def create_slot(payload: SlotCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if payload.project_id and not db.get(Project,payload.project_id):
+        raise HTTPException(404,'Project not found')
+    # Acquires a per-owner write lock on PostgreSQL AND SQLite before checking
+    # overlap; a query/FOR UPDATE alone does not serialize SQLite writers.
+    db.execute(update(User).where(User.id == current_user.id).values(correction_points=User.correction_points))
+    overlap=db.query(CorrectionSlot).filter(CorrectionSlot.corrector_id==current_user.id,
+        CorrectionSlot.start_time<payload.end_time,CorrectionSlot.end_time>payload.start_time).first()
+    if overlap: raise HTTPException(409,'Overlapping slot')
     slot = CorrectionSlot(
         corrector_id=current_user.id,
         project_id=payload.project_id,
@@ -182,35 +212,39 @@ def available_slots(project_id: Optional[str] = None, current_user: User = Depen
     
     return result
 
-@router.post("/slots/{slot_id}/book")
+@router.post("/slots/{slot_id}/book", dependencies=[Depends(review_rate_limit)])
 def book_slot(slot_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    slot = db.query(CorrectionSlot).filter(CorrectionSlot.id == slot_id).first()
+    slot = db.query(CorrectionSlot).filter(CorrectionSlot.id == slot_id).with_for_update().first()
     if not slot:
         raise HTTPException(status_code=404, detail="Slot non trouvé")
+    if slot.corrector_id == current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot book your own review slot")
+    if slot.start_time <= datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Slot has expired")
     if slot.is_booked:
         raise HTTPException(status_code=400, detail="Slot déjà réservé")
     
-    slot.is_booked = True
-    slot.booked_by = current_user.id
-    
-    # Create correction linked to slot
-    # Find latest submission for project
-    if slot.project_id:
-        submission = db.query(Submission).filter(
-            Submission.user_id == current_user.id,
-            Submission.project_id == slot.project_id
-        ).order_by(Submission.created_at.desc()).first()
-        
-        if submission:
-            correction = Correction(
-                submission_id=submission.id,
-                author_id=current_user.id,
-                corrector_id=slot.corrector_id,
-                status="scheduled",
-                scheduled_at=slot.start_time,
-                checklist=CorrectionService.get_checklist_for_project(slot.project_id, db)
-            )
-            db.add(correction)
-    
+    if not slot.project_id:
+        raise HTTPException(409,'Slot must specify a project before booking')
+    submission=db.query(Submission).filter(Submission.user_id==current_user.id,
+        Submission.project_id==slot.project_id).order_by(Submission.created_at.desc()).first()
+    if not submission:
+        raise HTTPException(409,'Submit this project before booking a review')
+    # Atomic compare-and-swap also protects SQLite (FOR UPDATE alone does not).
+    claimed=db.execute(update(CorrectionSlot).where(CorrectionSlot.id==slot_id,
+        CorrectionSlot.is_booked==False).values(is_booked=True,booked_by=current_user.id))
+    if claimed.rowcount!=1:
+        db.rollback()
+        raise HTTPException(409,'Slot already booked')
+    correction=Correction(submission_id=submission.id,author_id=current_user.id,
+        corrector_id=slot.corrector_id,status='scheduled',scheduled_at=slot.start_time,
+        checklist=CorrectionService.get_checklist_for_project(slot.project_id,db))
+    db.add(correction)
+    from app.models.notification import Notification
+    # Same transaction as the slot claim: rollback must not leave ghost alerts.
+    for owner in (current_user.id, slot.corrector_id):
+        db.add(Notification(user_id=owner, kind='review_scheduled',
+            text='Une correction a été réservée pour le ' + slot.start_time.isoformat() + ' UTC.',
+            path='/peer-review'))
     db.commit()
-    return {"ok": True, "slot_id": slot_id}
+    return {'ok':True,'slot_id':slot_id,'correction_id':correction.id}

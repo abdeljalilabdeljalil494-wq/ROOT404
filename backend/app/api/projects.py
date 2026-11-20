@@ -7,7 +7,7 @@ import re
 import logging
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, judge_rate_limit
+from app.core.dependencies import get_current_user, require_admin, judge_rate_limit
 from app.core.security import sanitize_input
 from app.core.config import settings
 from app.models.user import User
@@ -113,7 +113,7 @@ def list_projects(
                 "langColor": proj.lang_color,
                 "desc": proj.description,
                 "tags": proj.tags or [],
-                "status": prog.status if prog else proj.status_default,
+                "status": prog.status if prog else ("locked" if proj.requires else "available"),
                 "progress": prog.progress if prog else None,
                 "score": prog.best_score if prog else None,
                 "xp": proj.xp,
@@ -190,7 +190,7 @@ def get_project(slug: str, current_user: User = Depends(get_current_user), db: S
         "requires": project.requires,
         "objectives": project.objectives or [],
         "constraints": project.constraints or [],
-        "status": progress.status if progress else project.status_default,
+        "status": progress.status if progress else ("locked" if project.requires else "available"),
         "progress": progress.progress if progress else 0,
         "score": progress.best_score if progress else None,
         "attempts": progress.attempts if progress else 0,
@@ -238,6 +238,13 @@ def submit_project(
     if progress and progress.status == "locked":
         raise HTTPException(status_code=403, detail="Projet verrouillé, complète les prérequis")
     
+    if project.requires:
+        prerequisite = db.query(UserProjectProgress).join(Project, Project.id == UserProjectProgress.project_id).filter(
+            UserProjectProgress.user_id == current_user.id, Project.slug == project.requires,
+            UserProjectProgress.status == "passed").first()
+        if not prerequisite:
+            raise HTTPException(status_code=403, detail="Project prerequisite has not been completed")
+
     # Validate files again with security service
     valid, msg = validate_files(payload.files, payload.language)
     if not valid:
@@ -246,12 +253,19 @@ def submit_project(
     # Run moulinette with error handling
     try:
         result = run_moulinette(slug, payload.files, payload.language)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Moulinette failed for {slug} by {current_user.username}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Moulinette execution failed")
     
-    # Save submission with transaction safety
+    # Serialize awards per user in PostgreSQL, then reread progress after execution.
+    # A failed second submission must not erase an earlier completion.
+    xp_earned = 0
     try:
+        current_user = db.query(User).filter(User.id == current_user.id).with_for_update().populate_existing().one()
+        progress = db.query(UserProjectProgress).filter_by(user_id=current_user.id, project_id=project.id).populate_existing().first()
+        already_passed = bool(progress and progress.status == "passed")
         submission = Submission(
             user_id=current_user.id,
             project_id=project.id,
@@ -319,12 +333,16 @@ def submit_project(
                         np_progress.status = "available"
                     unlocked.append(np.slug)
                 
-                GamificationService.complete_project(current_user, project.xp, result["score"], db)
-                SkillGraphService.update_from_submission(current_user, submission, project, result["score"], db)
+                if not already_passed:
+                    from datetime import datetime
+                    progress.completed_at = datetime.utcnow()
+                    award = GamificationService.complete_project(current_user, project.xp, result["score"], db, commit=False)
+                    xp_earned = award["xp_earned"]
+                    SkillGraphService.update_from_submission(current_user, submission, project, result["score"], db, commit=False)
             except Exception as e:
                 logger.error(f"Error updating progress after pass: {e}", exc_info=True)
-                # Don't fail submission if gamification fails
-        else:
+                raise
+        elif not already_passed:
             progress.status = "progress"
         
         db.commit()
@@ -356,7 +374,7 @@ def submit_project(
         "logs": result["logs"],
         "status": progress.status,
         "progress": progress.progress,
-        "xp_earned": project.xp * result["score"] // 100 if result["score"] >= 80 else 0,
+        "xp_earned": xp_earned,
         "next_projects_unlocked": unlocked
     }
 
@@ -390,7 +408,7 @@ def get_submissions(slug: str, current_user: User = Depends(get_current_user), d
         } for s in subs
     ]
 
-@router.post("/seed")
+@router.post("/seed", dependencies=[Depends(require_admin)])
 def seed_projects(db: Session = Depends(get_db)):
     """Seed default projects - restricted to development"""
     if settings.ENVIRONMENT == "production":

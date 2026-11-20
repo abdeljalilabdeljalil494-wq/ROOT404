@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel, EmailStr, Field, field_validator
+from app.services.email import EmailDeliveryError
 from app.core.database import get_db
 from app.core.security import (
     generate_and_store_otp, verify_otp, create_access_token, get_last_otp,
@@ -112,12 +113,14 @@ def request_otp(payload: OtpRequest, request: Request, db: Session = Depends(get
             "expires_in": settings.OTP_EXPIRE_MINUTES * 60
         }
         
-        if settings.ENVIRONMENT != "production":
+        if settings.ENVIRONMENT == "development" and settings.ENABLE_DEV_OTP:
             response["dev_otp"] = otp
             response["dev_warning"] = "dev_otp only returned in development mode"
         
         return response
         
+    except EmailDeliveryError:
+        raise HTTPException(status_code=503, detail="Email delivery unavailable; retry requesting a code")
     except HTTPException:
         raise
     except SQLAlchemyError as e:
@@ -139,11 +142,6 @@ def verify_otp_code(payload: OtpVerify, request: Request, db: Session = Depends(
         
         is_valid = verify_otp(email, code)
         
-        if not is_valid and settings.ENVIRONMENT != "production":
-            last = get_last_otp(email)
-            if last and code == last:
-                is_valid = True
-        
         if not is_valid:
             logger.warning(f"Invalid OTP attempt for {email} from {request.client.host if request.client else 'unknown'}")
             raise HTTPException(status_code=400, detail="Code OTP invalide ou expiré")
@@ -161,7 +159,9 @@ def verify_otp_code(payload: OtpVerify, request: Request, db: Session = Depends(
         if not user.is_active:
             raise HTTPException(status_code=403, detail="Compte désactivé ou gelé (Black Hole)")
         
-        token = create_access_token({"sub": user.id, "username": user.username})
+        user.is_verified = True
+        db.commit()
+        token = create_access_token({"sub": user.id, "username": user.username, "sv": user.session_version})
         
         logger.info(f"User {user.username} logged in via OTP from {request.client.host if request.client else 'unknown'}")
         
@@ -172,6 +172,8 @@ def verify_otp_code(payload: OtpVerify, request: Request, db: Session = Depends(
             "user": user.to_dict()
         }
         
+    except EmailDeliveryError:
+        raise HTTPException(status_code=503, detail="Email delivery unavailable; retry requesting a code")
     except HTTPException:
         raise
     except Exception as e:
@@ -228,9 +230,10 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
         except ValueError as e:
             logger.warning(f"OTP rate limit after registration for {payload.email}: {e}")
             otp = None
-        except Exception as e:
-            logger.error(f"Failed to generate OTP for {payload.email}: {e}")
-            otp = None
+        except EmailDeliveryError:
+            raise
+        except Exception:
+            raise HTTPException(status_code=503, detail="Account created; retry requesting a code")
         
         logger.info(f"New user registered: {user.username} ({user.email}) from {request.client.host if request.client else 'unknown'}")
         
@@ -240,18 +243,20 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
             "next_step": "verify_otp"
         }
         
-        if settings.ENVIRONMENT != "production" and otp:
+        if settings.ENVIRONMENT == "development" and settings.ENABLE_DEV_OTP and otp:
             response["dev_otp"] = otp
         
         return response
         
+    except EmailDeliveryError:
+        raise HTTPException(status_code=503, detail="Email delivery unavailable; retry requesting a code")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error in registration: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(auth_rate_limit)])
 def login_simple(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """Simplified login - just email, sends OTP (rate limited via otp endpoint)"""
     return request_otp(OtpRequest(email=payload.email), request, db)
@@ -267,12 +272,9 @@ def get_me_full(current_user: User = Depends(get_current_user), db: Session = De
         from app.services.skill_graph import SkillGraphService
         from app.services.integrity import IntegrityService
         
-        try:
-            mission = GamificationService.generate_daily_mission(current_user, db)
-        except Exception as e:
-            logger.warning(f"Failed to generate daily mission for {current_user.username}: {e}")
-            mission = None
-        
+        from app.services.beta_progress import mission as current_mission
+        mission = current_mission(db,current_user)
+
         try:
             skills = SkillGraphService.get_skill_graph_for_user(current_user)
             gaps = SkillGraphService.get_knowledge_gaps(current_user)
@@ -299,13 +301,7 @@ def get_me_full(current_user: User = Depends(get_current_user), db: Session = De
             "skills": skills,
             "knowledgeGaps": gaps,
             "integrity": integrity,
-            "dailyMission": {
-                "title": mission.title if mission else "Reverse a linked list",
-                "difficulty": mission.difficulty if mission else 3,
-                "time": "~30 min",
-                "reward": mission.reward_xp if mission else 120,
-                "skill": mission.skill if mission else "Structures de données"
-            },
+            "dailyMission": {**mission,"reward":mission['reward_xp'],"difficulty":1,"time":"UTC","skill":"Stream Sum — Python"},
             "streakInfo": streak_info
         })
         return base
@@ -314,7 +310,12 @@ def get_me_full(current_user: User = Depends(get_current_user), db: Session = De
         return current_user.to_dict()
 
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_user)):
-    """Logout - client should delete token, server could blacklist if using Redis"""
-    logger.info(f"User {current_user.username} logged out")
-    return {"ok": True, "message": "Déconnecté avec succès"}
+def logout(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.core.security import decode_token
+    from app.models.auth_state import RevokedToken
+    from datetime import datetime
+    token = request.headers.get("authorization", "").split(" ", 1)[-1]
+    payload = decode_token(token)
+    db.merge(RevokedToken(jti=payload["jti"], expires_at=datetime.utcfromtimestamp(payload["exp"])))
+    db.commit()
+    return {"ok": True}
